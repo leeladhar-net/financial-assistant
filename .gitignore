@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual Environment
+venv/
+env/
+.venv/
+ENV/
+
+# Environment variables - NEVER commit real secrets
+.env
+*.env.local
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Pytest cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Alembic
+migrations/versions/__pycache__/
