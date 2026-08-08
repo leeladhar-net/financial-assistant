@@ -131,6 +131,8 @@ def debug_info():
             return "configured_but_short"
         return f"{k[:4]}...{k[-4:]}"
 
+    from app.core.logging import LOG_BUFFER
+
     return {
         "db_status": db_status,
         "user_count": user_count,
@@ -141,5 +143,6 @@ def debug_info():
         "llm_provider": settings.LLM_PROVIDER,
         "llm_key": mask_key(settings.LLM_API_KEY),
         "finnhub_key": mask_key(settings.FINNHUB_API_KEY),
-        "newsapi_key": mask_key(settings.NEWSAPI_KEY)
+        "newsapi_key": mask_key(settings.NEWSAPI_KEY),
+        "recent_logs": list(LOG_BUFFER)
     }
