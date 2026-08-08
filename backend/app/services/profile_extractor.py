@@ -28,6 +28,11 @@ Onboarding Steps & Validation Rules:
 6. ASK_RESPONSE_STYLE: User specifies response style (quick, standard, detailed).
    - Valid: Expresses preference for detail level.
 
+CRITICAL TYPO & SPELLING INSTRUCTIONS:
+- Users will make spelling mistakes or typos (e.g., "indai" for "India", "aplle" for "Apple", "stoock" for "stock", "infaltions" for "Inflation", "carsk" for "crash", "dorp" for "drop").
+- ALWAYS auto-correct these typos to their correct spelling, set "is_valid": true, and extract the standardized value. Do NOT mark typos as invalid.
+- Only set "is_valid": false if the response is complete gibberish (e.g. "asdfghjk", "1234567") or completely unrelated to the onboarding flow.
+
 CRITICAL INSTRUCTIONS FOR USER ANSWERS LIKE 'yes', 'no', 'sure', 'yes like that', OR IF THE USER IS UNSURE:
 - If the user says 'yes', 'sure', 'yes like that', or agrees with the assistant's previous suggestion (found in the history), look at the assistant's previous message. Extract the topics/options the assistant suggested as the user's choices.
   For example, if the assistant suggested "AI trends or AI stocks" and the user replied "yes like that", set interests to ["AI Trends", "AI Stocks"] and set is_valid to true.
