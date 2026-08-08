@@ -8,33 +8,41 @@ from app.core.config import settings
 from app.core.logging import logger
 
 PARSING_SYSTEM_PROMPT = """You are a highly intelligent natural language parser for a personal financial advisor onboarding chat.
-Analyze the user's latest response in the context of the current onboarding step, check if it is meaningful, clean up any typos, translate names to stock tickers, and output a clean JSON object.
+Analyze the user's latest response in the context of the recent conversation history and the current onboarding step. Clean up any typos, translate names to stock tickers, and output a clean JSON object.
 
 Onboarding Steps & Validation Rules:
-1. ASK_ROLE: User specifies their investment role (e.g. "equity researcher", "retail investor", "day trader").
-   - Valid: Must describe an investment style or job. A greeting like "ji", "hi", or gibberish like "ok" is INVALID.
-   - Standardize to a professional title (e.g., "PM" -> "Portfolio Manager", "investor" -> "Retail Investor").
+1. ASK_ROLE: User specifies their investment role (e.g. "equity researcher", "retail investor").
+   - Valid: Must describe an investment style or job. A greeting like "ji" or gibberish like "ok" is INVALID.
+   - Standardize to a professional title (e.g. "PM" -> "Portfolio Manager").
 2. ASK_MARKETS: User specifies regions or sectors (e.g. "us and india", "tech").
    - Valid: Plausible countries, regions, or sectors.
-   - Standardize to a list of clean strings (e.g., "us and india" -> ["US", "India"], "tech" -> ["Technology"]).
+   - Standardize to a list of clean strings.
 3. ASK_WATCHLIST: User specifies companies or stock tickers.
    - Valid: Must list company names or tickers.
-   - Translate names/vague terms to stock symbols: e.g. "apple" -> "AAPL", "adani" -> "ADANIENT", "tata steel" -> "TATASTEEL", "samsung" -> "SMSN", "nvidia" -> "NVDA".
-   - Standardize to a list of capitalized symbols (e.g. ["AAPL", "ADANIENT", "TATASTEEL"]).
+   - Translate names to stock symbols (e.g. "apple" -> "AAPL", "adani" -> "ADANIENT", "tata steel" -> "TATASTEEL").
 4. ASK_INTERESTS: User specifies topics they care about (e.g. "infaltions", "market crash").
-   - Valid: Plausible finance/market themes.
-   - Correct spelling/typos and standardize (e.g. "infaltions" -> ["Inflation"], "market crash" -> ["Market Downturns"]).
-5. ASK_BRIEFING_TIME: User specifies update time (e.g. "9", "morning").
-   - Valid: A time or time range.
-   - Standardize (e.g., "9" -> "9:00 AM", "morning" -> "8:00 AM").
+   - Valid: Plausible finance/market themes. *Short answers like "ai" or "stocks" are 100% VALID.*
+   - Correct spelling/typos and standardize (e.g. "infaltions" -> ["Inflation"]).
+5. ASK_BRIEFING_TIME: User specifies update time.
+   - Valid: A time or time range (e.g. "8 AM").
 6. ASK_RESPONSE_STYLE: User specifies response style (quick, standard, detailed).
    - Valid: Expresses preference for detail level.
-   - Output must be "quick", "standard", or "detailed". Map vague answers (e.g. "depends on the content") to "standard".
+
+CRITICAL INSTRUCTIONS FOR USER ANSWERS LIKE 'yes', 'no', 'sure', 'yes like that', OR IF THE USER IS UNSURE:
+- If the user says 'yes', 'sure', 'yes like that', or agrees with the assistant's previous suggestion (found in the history), look at the assistant's previous message. Extract the topics/options the assistant suggested as the user's choices.
+  For example, if the assistant suggested "AI trends or AI stocks" and the user replied "yes like that", set interests to ["AI Trends", "AI Stocks"] and set is_valid to true.
+- If the user says 'no', 'i don't know', 'whatever', or seems confused/unsure, OR if they have failed validation previously, DO NOT mark it as invalid. Instead, set is_valid to true and assign a sensible default value so the user does not get stuck in a loop:
+  - Default Role: "Retail Investor"
+  - Default Markets: ["Global Markets"]
+  - Default Watchlist: ["AAPL", "NVDA"]
+  - Default Interests: ["General Market News", "Technology Trends"]
+  - Default Briefing Time: "8:00 AM"
+  - Default Response Style: "standard"
 
 Your JSON output structure must be:
 {
   "is_valid": true/false,
-  "clarification": "Polite, warm, human-like clarification response if is_valid is false (e.g. 'Haha, I didn\\'t quite catch that! Are you investing for yourself, trading, or working as a professional?'), otherwise empty string.",
+  "clarification": "Polite, warm, human-like clarification response if is_valid is false, otherwise empty string.",
   "role": "string or null",
   "markets": ["string"] or null,
   "watchlist": ["string"] or null,
@@ -42,14 +50,14 @@ Your JSON output structure must be:
   "briefing_time": "string or null",
   "response_style": "string or null"
 }
-
-Do not include any explanation, markdown formatting, or preamble. Return raw JSON only."""
+Return raw JSON only."""
 
 class ProfileExtractorService:
     @staticmethod
-    async def extract_profile_info_llm(text: str, current_state: str) -> Dict[str, Any]:
+    async def extract_profile_info_llm(text: str, current_state: str, history: List[str] = []) -> Dict[str, Any]:
         """
         Uses Groq LLM to parse and validate onboarding responses in a friendly, conversational manner.
+        Passes conversation history to allow resolving context (e.g. 'yes like that', 'sure').
         """
         if current_state == "NEW":
             return ProfileExtractorService.extract_profile_info_fallback(text, current_state)
@@ -57,7 +65,13 @@ class ProfileExtractorService:
         if not text or not settings.LLM_API_KEY:
             return ProfileExtractorService.extract_profile_info_fallback(text, current_state)
 
-        prompt = f"Current Step: {current_state}\nUser Response: \"{text}\"\n\nParse this and output the JSON object."
+        history_context = "\n".join(history[-4:]) if history else "No history"
+        prompt = (
+            f"Recent Conversation History:\n{history_context}\n\n"
+            f"Current Step: {current_state}\n"
+            f"User Latest Response: \"{text}\"\n\n"
+            f"Parse this and output the JSON object."
+        )
         
         try:
             llm = LLMProvider()

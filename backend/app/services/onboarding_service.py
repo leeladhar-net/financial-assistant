@@ -23,8 +23,14 @@ class OnboardingService:
         current_state = user.onboarding_state or "NEW"
         logger.info(f"Processing onboarding for user_id={user.id}, state={current_state}")
 
-        # 1. Parse and validate the response using Groq LLM
-        parsed = await ProfileExtractorService.extract_profile_info_llm(message_text, current_state)
+        # Fetch conversation history to pass as context
+        from app.services.conversation_service import ConversationService
+        conv = ConversationService.get_or_create_active_conversation(db, user.id)
+        recent_msgs = ConversationService.get_recent_messages(db, conv.id, limit=5)
+        history = [f"{m.role.upper()}: {m.content}" for m in recent_msgs]
+
+        # 1. Parse and validate the response using Groq LLM with history context
+        parsed = await ProfileExtractorService.extract_profile_info_llm(message_text, current_state, history)
         
         # 2. Check validation
         if not parsed.get("is_valid", True):
