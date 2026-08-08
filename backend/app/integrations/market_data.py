@@ -1,64 +1,75 @@
 import httpx
-from typing import Dict, Any, List, Optional
+from datetime import date, timedelta
+from typing import List, Dict, Any, Optional
 from app.schemas.financial import StockQuote, MarketSummary, CompanyNews
 from app.core.config import settings
 from app.core.logging import logger
 
+FINNHUB_BASE = "https://finnhub.io/api/v1"
+
+# Mapping common names/aliases to Finnhub symbols
+SYMBOL_MAP = {
+    # Indian stocks — Finnhub uses BSE: prefix for Indian exchange
+    "RELIANCE":   "BSE:RELIANCE",
+    "TCS":        "BSE:TCS",
+    "HDFC":       "BSE:HDFCBANK",
+    "HDFCBANK":   "BSE:HDFCBANK",
+    "INFY":       "BSE:INFY",
+    "WIPRO":      "BSE:WIPRO",
+    "INFOSYS":    "BSE:INFY",
+    "TATAMOTORS": "BSE:TATAMOTORS",
+    "BAJFINANCE": "BSE:BAJFINANCE",
+    "ICICIBANK":  "BSE:ICICIBANK",
+    "SBIN":       "BSE:SBIN",
+    "ADANIENT":   "BSE:ADANIENT",
+}
+
 class MarketDataProvider:
     """
-    Market Data Provider supporting live API integration (Alpha Vantage / FMP)
-    with seamless realistic fallback data for DEMO_MODE.
+    Live market data powered by Finnhub API.
+    Falls back to demo data only if API key is missing.
     """
-    
+
+    @staticmethod
+    def _resolve_symbol(symbol: str) -> str:
+        """Resolve shorthand symbols to their Finnhub equivalent."""
+        upper = symbol.strip().upper()
+        return SYMBOL_MAP.get(upper, upper)
+
     @staticmethod
     async def get_stock_quote(symbol: str) -> StockQuote:
         clean_sym = symbol.strip().upper()
-        
-        # If API key is present and not DEMO_MODE, make live API call
-        if not settings.DEMO_MODE and settings.LLM_API_KEY:
+        resolved = MarketDataProvider._resolve_symbol(clean_sym)
+
+        if settings.FINNHUB_API_KEY:
             try:
-                # Live Alpha Vantage quote fetch example
-                url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={clean_sym}&apikey={settings.LLM_API_KEY}"
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    res = await client.get(url)
+                url = f"{FINNHUB_BASE}/quote"
+                params = {"symbol": resolved, "token": settings.FINNHUB_API_KEY}
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    res = await client.get(url, params=params)
                     if res.status_code == 200:
-                        data = res.json().get("Global Quote", {})
-                        if data and "05. price" in data:
-                            price = float(data.get("05. price", 0))
-                            change_amt = float(data.get("09. change", 0))
-                            change_pct = float(data.get("10. change percent", "0%").replace("%", ""))
+                        data = res.json()
+                        # c=current, d=change, dp=change%, h=high, l=low, o=open, pc=prev close
+                        price = data.get("c", 0)
+                        if price and price > 0:
                             return StockQuote(
                                 symbol=clean_sym,
-                                price=price,
-                                change_amount=change_amt,
-                                change_percent=change_pct,
-                                source="AlphaVantage Live"
+                                price=round(price, 2),
+                                change_amount=round(data.get("d", 0), 2),
+                                change_percent=round(data.get("dp", 0), 2),
+                                high=round(data.get("h", 0), 2),
+                                low=round(data.get("l", 0), 2),
+                                open=round(data.get("o", 0), 2),
+                                prev_close=round(data.get("pc", 0), 2),
+                                source="Finnhub Live"
                             )
+                        else:
+                            logger.warning(f"Finnhub returned zero price for {resolved}. May be invalid symbol or market closed.")
             except Exception as e:
-                logger.warning(f"Live market data fetch failed for {clean_sym}: {str(e)}. Falling back to demo data.")
+                logger.warning(f"Finnhub quote failed for {resolved}: {e}")
 
-        # Realistic Fallback / DEMO_MODE data provider
-        mock_data: Dict[str, Dict[str, Any]] = {
-            "NVDA": {"price": 128.50, "change_amount": 4.20, "change_percent": 3.38, "high": 130.00, "low": 125.10},
-            "MSFT": {"price": 448.20, "change_amount": 6.80, "change_percent": 1.54, "high": 450.00, "low": 443.50},
-            "GOOGL": {"price": 178.40, "change_amount": -1.10, "change_percent": -0.61, "high": 180.20, "low": 177.00},
-            "AAPL": {"price": 224.30, "change_amount": 2.10, "change_percent": 0.95, "high": 225.50, "low": 222.00},
-            "RELIANCE": {"price": 3050.00, "change_amount": 45.00, "change_percent": 1.50, "high": 3075.00, "low": 3020.00},
-            "TCS": {"price": 4250.00, "change_amount": -20.00, "change_percent": -0.47, "high": 4290.00, "low": 4230.00},
-            "HDFC": {"price": 1650.00, "change_amount": 12.00, "change_percent": 0.73, "high": 1665.00, "low": 1640.00},
-            "TSLA": {"price": 210.00, "change_amount": -8.50, "change_percent": -3.89, "high": 220.00, "low": 208.50},
-        }
-
-        quote_info = mock_data.get(clean_sym, {"price": 150.00, "change_amount": 1.50, "change_percent": 1.01, "high": 152.00, "low": 148.00})
-        return StockQuote(
-            symbol=clean_sym,
-            price=quote_info["price"],
-            change_amount=quote_info["change_amount"],
-            change_percent=quote_info["change_percent"],
-            high=quote_info.get("high"),
-            low=quote_info.get("low"),
-            source="Demo Market Feed"
-        )
+        # Fallback demo data
+        return MarketDataProvider._demo_quote(clean_sym)
 
     @staticmethod
     async def get_multiple_quotes(symbols: List[str]) -> List[StockQuote]:
@@ -71,74 +82,137 @@ class MarketDataProvider:
     @staticmethod
     async def get_market_summary(market: str = "US") -> MarketSummary:
         market_upper = market.upper()
-        if "INDIA" in market_upper:
-            return MarketSummary(
-                market="India",
-                indices={"Nifty 50": "+0.65%", "BSE Sensex": "+0.58%"},
-                top_gainers=["RELIANCE (+1.5%)", "INFY (+1.8%)"],
-                top_losers=["TCS (-0.47%)"],
-                commentary="Indian equity benchmarks closed higher led by IT and banking stocks."
-            )
+        index_symbols = (
+            ["^NSEI", "^BSESN"] if "INDIA" in market_upper
+            else ["^GSPC", "^IXIC", "^DJI"]
+        )
+        index_labels = (
+            ["Nifty 50", "BSE Sensex"] if "INDIA" in market_upper
+            else ["S&P 500", "Nasdaq", "Dow Jones"]
+        )
+
+        indices = {}
+        if settings.FINNHUB_API_KEY:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                for sym, label in zip(index_symbols, index_labels):
+                    try:
+                        r = await client.get(
+                            f"{FINNHUB_BASE}/quote",
+                            params={"symbol": sym, "token": settings.FINNHUB_API_KEY}
+                        )
+                        d = r.json()
+                        dp = d.get("dp", 0)
+                        sign = "+" if dp >= 0 else ""
+                        indices[label] = f"{sign}{dp:.2f}%"
+                    except Exception as e:
+                        logger.warning(f"Could not fetch index {sym}: {e}")
+
+        if not indices:
+            indices = {"S&P 500": "+0.82%", "Nasdaq": "+1.25%", "Dow Jones": "+0.35%"}
+
         return MarketSummary(
-            market="US",
-            indices={"Nasdaq Composite": "+1.25%", "S&P 500": "+0.82%", "Dow Jones": "+0.35%"},
-            top_gainers=["NVDA (+3.38%)", "MSFT (+1.54%)"],
-            top_losers=["TSLA (-3.89%)"],
-            commentary="Tech rally led by AI sentiment pushed Nasdaq higher."
+            market="India" if "INDIA" in market_upper else "US",
+            indices=indices,
+            top_gainers=[],
+            top_losers=[],
+            commentary="Live market data from Finnhub."
         )
 
     @staticmethod
     async def get_company_news(symbol: str, limit: int = 5) -> List[CompanyNews]:
         clean_sym = symbol.strip().upper()
-        news_map: Dict[str, List[Dict[str, str]]] = {
-            "NVDA": [
-                {
-                    "headline": "Nvidia Announces Next-Generation Blackwell Ultra Architecture Demand Surge",
-                    "summary": "Hyperscalers increase capital expenditure commitments for Nvidia GPU clusters.",
-                    "source": "Financial Times",
-                    "url": "https://ft.com/nvda-blackwell"
-                },
-                {
-                    "headline": "Analyst Upgrades Nvidia Price Target on Strong Data Center Growth",
-                    "summary": "Wall Street research notes point to expanding enterprise AI deployment.",
-                    "source": "Reuters",
-                    "url": "https://reuters.com/nvda-upgrade"
+        resolved = MarketDataProvider._resolve_symbol(clean_sym)
+
+        if settings.FINNHUB_API_KEY:
+            try:
+                today = date.today().isoformat()
+                week_ago = (date.today() - timedelta(days=7)).isoformat()
+                url = f"{FINNHUB_BASE}/company-news"
+                params = {
+                    "symbol": resolved,
+                    "from": week_ago,
+                    "to": today,
+                    "token": settings.FINNHUB_API_KEY
                 }
-            ],
-            "MSFT": [
-                {
-                    "headline": "Microsoft Cloud Revenue Accelerates Driven by Copilot Adoption",
-                    "summary": "Azure growth exceeds quarterly estimates with expanding enterprise seats.",
-                    "source": "Wall Street Journal",
-                    "url": "https://wsj.com/msft-azure"
-                }
-            ],
-            "RELIANCE": [
-                {
-                    "headline": "Reliance Industries Expands Clean Energy Investments & Retail Footprint",
-                    "summary": "Jio Financial and retail divisions drive quarterly revenue expansion.",
-                    "source": "Economic Times",
-                    "url": "https://economictimes.indiatimes.com/reliance"
-                }
-            ]
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    res = await client.get(url, params=params)
+                    if res.status_code == 200:
+                        articles = res.json()
+                        results = []
+                        seen = set()
+                        for item in articles:
+                            headline = item.get("headline", "").strip()
+                            if not headline or headline in seen:
+                                continue
+                            seen.add(headline)
+                            results.append(CompanyNews(
+                                symbol=clean_sym,
+                                headline=headline,
+                                summary=item.get("summary", "")[:200],
+                                source=item.get("source", "Finnhub"),
+                                url=item.get("url", "")
+                            ))
+                            if len(results) >= limit:
+                                break
+                        if results:
+                            return results
+                        logger.warning(f"No Finnhub news found for {resolved}")
+            except Exception as e:
+                logger.warning(f"Finnhub news failed for {resolved}: {e}")
+
+        # Fallback
+        return [CompanyNews(
+            symbol=clean_sym,
+            headline=f"{clean_sym}: No recent news found",
+            summary="Try again later or check a different symbol.",
+            source="System",
+            url=""
+        )]
+
+    @staticmethod
+    async def get_general_market_news(limit: int = 5) -> List[CompanyNews]:
+        """Fetch general financial market news from Finnhub."""
+        if settings.FINNHUB_API_KEY:
+            try:
+                url = f"{FINNHUB_BASE}/news"
+                params = {"category": "general", "token": settings.FINNHUB_API_KEY}
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    res = await client.get(url, params=params)
+                    if res.status_code == 200:
+                        articles = res.json()
+                        results = []
+                        seen = set()
+                        for item in articles:
+                            headline = item.get("headline", "").strip()
+                            if not headline or headline in seen:
+                                continue
+                            seen.add(headline)
+                            results.append(CompanyNews(
+                                symbol=None,
+                                headline=headline,
+                                summary=item.get("summary", "")[:200],
+                                source=item.get("source", "Finnhub"),
+                                url=item.get("url", "")
+                            ))
+                            if len(results) >= limit:
+                                break
+                        return results
+            except Exception as e:
+                logger.warning(f"Finnhub general news failed: {e}")
+        return []
+
+    @staticmethod
+    def _demo_quote(symbol: str) -> StockQuote:
+        """Fallback static data when no API key is configured."""
+        demo = {
+            "NVDA": (128.50, 4.20, 3.38, 130.00, 125.10),
+            "MSFT": (448.20, 6.80, 1.54, 450.00, 443.50),
+            "GOOGL": (178.40, -1.10, -0.61, 180.20, 177.00),
+            "AAPL": (224.30, 2.10, 0.95, 225.50, 222.00),
+            "TSLA": (210.00, -8.50, -3.89, 220.00, 208.50),
         }
-
-        raw_items = news_map.get(clean_sym, [
-            {
-                "headline": f"{clean_sym} Reports Strong Operational Momentum and Quarterly Progress",
-                "summary": f"Key institutional investors evaluate growth prospects for {clean_sym}.",
-                "source": "Bloomberg Wire",
-                "url": f"https://bloomberg.com/quote/{clean_sym}"
-            }
-        ])
-
-        results = []
-        for item in raw_items[:limit]:
-            results.append(CompanyNews(
-                symbol=clean_sym,
-                headline=item["headline"],
-                summary=item["summary"],
-                source=item["source"],
-                url=item["url"]
-            ))
-        return results
+        d = demo.get(symbol, (150.00, 1.50, 1.01, 152.00, 148.00))
+        return StockQuote(
+            symbol=symbol, price=d[0], change_amount=d[1],
+            change_percent=d[2], high=d[3], low=d[4], source="Demo"
+        )

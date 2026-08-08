@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     LLM_API_KEY: Optional[str] = None
     LLM_PROVIDER: str = "openai"
 
+    # Market Data
+    FINNHUB_API_KEY: Optional[str] = None
+    NEWSAPI_KEY: Optional[str] = None
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def fix_postgres_url(cls, v: str) -> str:

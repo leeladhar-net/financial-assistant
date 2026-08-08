@@ -9,6 +9,8 @@ class StockQuote(BaseModel):
     volume: Optional[int] = None
     high: Optional[float] = None
     low: Optional[float] = None
+    open: Optional[float] = None
+    prev_close: Optional[float] = None
     market: Optional[str] = "US"
     source: str = "Live Feed"
 
