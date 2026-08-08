@@ -25,14 +25,19 @@ async def _run_polling():
         await client.post(f"{base_url}/deleteWebhook")
         while True:
             try:
+                logger.info(f"Polling Telegram (offset={offset})...")
                 res = await client.get(
                     f"{base_url}/getUpdates",
                     params={"offset": offset, "timeout": 20}
                 )
+                logger.info(f"getUpdates response status: {res.status_code}")
                 if res.status_code == 200:
                     data = res.json()
                     if data.get("ok"):
-                        for update_raw in data.get("result", []):
+                        updates = data.get("result", [])
+                        if updates:
+                            logger.info(f"Received {len(updates)} updates from Telegram.")
+                        for update_raw in updates:
                             offset = update_raw["update_id"] + 1
                             try:
                                 update = TelegramUpdate.model_validate(update_raw)
