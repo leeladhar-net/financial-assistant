@@ -104,3 +104,42 @@ def root():
 @app.get("/health", status_code=status.HTTP_200_OK, tags=["Health"])
 def root_health():
     return {"status": "ok", "app_name": settings.APP_NAME}
+
+# Debug endpoint to diagnose bot issues on Render
+@app.get("/debug", status_code=status.HTTP_200_OK, tags=["Debug"])
+def debug_info():
+    from app.database.session import SessionLocal
+    from app.models.user import User
+    from app.models.conversation import Message
+    
+    db_status = "unknown"
+    user_count = 0
+    message_count = 0
+    
+    try:
+        with SessionLocal() as db:
+            user_count = db.query(User).count()
+            message_count = db.query(Message).count()
+            db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+
+    def mask_key(k: Optional[str]) -> str:
+        if not k:
+            return "not_configured"
+        if len(k) < 8:
+            return "configured_but_short"
+        return f"{k[:4]}...{k[-4:]}"
+
+    return {
+        "db_status": db_status,
+        "user_count": user_count,
+        "message_count": message_count,
+        "env": settings.ENVIRONMENT,
+        "demo_mode": settings.DEMO_MODE,
+        "bot_token": mask_key(settings.TELEGRAM_BOT_TOKEN),
+        "llm_provider": settings.LLM_PROVIDER,
+        "llm_key": mask_key(settings.LLM_API_KEY),
+        "finnhub_key": mask_key(settings.FINNHUB_API_KEY),
+        "newsapi_key": mask_key(settings.NEWSAPI_KEY)
+    }
