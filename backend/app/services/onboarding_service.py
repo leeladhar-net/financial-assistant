@@ -1,15 +1,21 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict, Any
 from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.services.user_service import UserService
 from app.services.profile_extractor import ProfileExtractorService
 from app.services.memory_service import MemoryService
+from app.integrations.llm_provider import LLMProvider
 from app.core.logging import logger
+
+RECAP_SYSTEM_PROMPT = """You are a warm, elite personal financial advisor.
+Based on the user's finalized preferences, write a friendly 3-sentence summary of their profile. 
+Explain naturally *why* you selected these settings for them, and end with a conversational invitation to start.
+Refer to the user as "you". Do not use bullet points or lists in your summary. Keep it warm and human-like."""
 
 class OnboardingService:
     @staticmethod
-    def process_onboarding_message(db: Session, user: User, message_text: str) -> str:
+    async def process_onboarding_message(db: Session, user: User, message_text: str) -> str:
         """
         Processes incoming onboarding text message, extracts profile fields, updates state,
         and returns the next natural response.
@@ -17,88 +23,122 @@ class OnboardingService:
         current_state = user.onboarding_state or "NEW"
         logger.info(f"Processing onboarding for user_id={user.id}, state={current_state}")
 
-        # Extract profile information from current message
-        extracted = ProfileExtractorService.extract_profile_info(message_text, current_state)
+        # 1. Parse and validate the response using Groq LLM
+        parsed = await ProfileExtractorService.extract_profile_info_llm(message_text, current_state)
+        
+        # 2. Check validation
+        if not parsed.get("is_valid", True):
+            # If the user input was invalid/gibberish, return the LLM's clarification question
+            clarification = parsed.get("clarification") or "Sorry, I didn't quite catch that. Could you clarify that for me?"
+            return clarification
 
-        # Update DB records with extracted attributes
-        if extracted.role:
-            UserService.update_user_preferences(db, user.id, role=extracted.role)
-            MemoryService.save_memory(db, user.id, "role", extracted.role, memory_type="profile")
+        # If brand new user and no info was parsed from the first message, ask the first question
+        if current_state == "NEW" and not parsed.get("role"):
+            UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_ROLE")
+            return (
+                "Hi! I'm your personal financial advisor. 💼\n\n"
+                "I'll help you track companies, global markets, and financial trends that align with your goals.\n\n"
+                "To get started, what best describes your current investment role or background? (e.g. retail investor, student, day trader, analyst)"
+            )
 
-        if extracted.markets:
-            UserService.update_user_preferences(db, user.id, markets=extracted.markets)
-            MemoryService.save_memory(db, user.id, "markets", ", ".join(extracted.markets), memory_type="profile")
+        # 3. Update DB records with extracted attributes
+        if parsed.get("role"):
+            UserService.update_user_preferences(db, user.id, role=parsed["role"])
+            MemoryService.save_memory(db, user.id, "role", parsed["role"], memory_type="profile")
 
-        if extracted.watchlist:
-            UserService.add_watchlist_symbols(db, user.id, extracted.watchlist)
-            MemoryService.save_memory(db, user.id, "watchlist", ", ".join(extracted.watchlist), memory_type="profile")
+        if parsed.get("markets"):
+            UserService.update_user_preferences(db, user.id, markets=parsed["markets"])
+            MemoryService.save_memory(db, user.id, "markets", ", ".join(parsed["markets"]), memory_type="profile")
 
-        if extracted.interests:
-            UserService.add_user_interests(db, user.id, extracted.interests)
-            MemoryService.save_memory(db, user.id, "interests", ", ".join(extracted.interests), memory_type="profile")
+        if parsed.get("watchlist"):
+            UserService.add_watchlist_symbols(db, user.id, parsed["watchlist"])
+            MemoryService.save_memory(db, user.id, "watchlist", ", ".join(parsed["watchlist"]), memory_type="profile")
 
-        if extracted.briefing_time:
-            UserService.update_user_preferences(db, user.id, briefing_time=extracted.briefing_time)
-            MemoryService.save_memory(db, user.id, "briefing_time", extracted.briefing_time, memory_type="profile")
+        if parsed.get("interests"):
+            UserService.add_user_interests(db, user.id, parsed["interests"])
+            MemoryService.save_memory(db, user.id, "interests", ", ".join(parsed["interests"]), memory_type="profile")
 
-        if extracted.response_style:
-            UserService.update_user_preferences(db, user.id, response_style=extracted.response_style)
-            MemoryService.save_memory(db, user.id, "response_style", extracted.response_style, memory_type="profile")
+        if parsed.get("briefing_time"):
+            UserService.update_user_preferences(db, user.id, briefing_time=parsed["briefing_time"])
+            MemoryService.save_memory(db, user.id, "briefing_time", parsed["briefing_time"], memory_type="profile")
 
-        # Determine next missing requirement
+        if parsed.get("response_style"):
+            UserService.update_user_preferences(db, user.id, response_style=parsed["response_style"])
+            MemoryService.save_memory(db, user.id, "response_style", parsed["response_style"], memory_type="profile")
+
+        # 4. Fetch updated profile state
         pref = UserService.get_user_preferences(db, user.id)
         watchlists = user.watchlists
         interests = user.interests
 
-        # If user is brand new (NEW state) and hasn't provided role yet
-        if current_state == "NEW" and not pref.role:
-            UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_ROLE")
-            return (
-                "Hi! I'm your financial intelligence assistant.\n\n"
-                "I'll help you track the companies, markets, and financial topics that matter to you.\n\n"
-                "First — what best describes your role? (e.g. equity research analyst, portfolio manager, trader, investor)"
-            )
-
-        # Check missing fields sequentially
+        # Determine next question dynamically in a human-like, conversational tone
+        
+        # Check: Professional Role
         if not pref.role:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_ROLE")
-            return "Could you clarify what best describes your role?"
+            return "To help me tailor my research, what best describes your current investment role or background?"
 
+        # Check: Markets
         if not pref.markets or len(pref.markets) == 0:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_MARKETS")
-            return "What markets or regions do you mainly follow? (e.g. US, India, Europe, Global Technology)"
+            role_title = pref.role.replace("_", " ").title()
+            return f"Great, a {role_title}! What markets or regions do you follow most closely? (e.g. US, India, Global Tech)"
 
+        # Check: Watchlist Tickers
         if not watchlists or len(watchlists) == 0:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_WATCHLIST")
-            return "Which key companies or ticker symbols should I monitor for you? (e.g. NVDA, MSFT, GOOGL, RELIANCE)"
+            markets_str = " and ".join(pref.markets) if isinstance(pref.markets, list) else str(pref.markets)
+            return f"Understood, focusing on {markets_str} markets. Which specific companies or stock tickers should I keep an eye on for you?"
 
+        # Check: Interests / Topics
         if not interests or len(interests) == 0:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_INTERESTS")
-            return "Which topics matter most to your research? (e.g. AI, Earnings, M&A, Interest Rates, Inflation)"
+            return "Got it. When analyzing these stocks, what financial topics or events matter most to you? (e.g. AI, interest rates, earnings, inflation)"
 
+        # Check: Daily Briefing Time
         if not pref.briefing_time:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_BRIEFING_TIME")
-            return "When would you prefer to receive your daily financial briefing? (e.g. 8:00 AM, 9:00 AM)"
+            return "Perfect. What time of day would you like to receive your personalized daily market briefing? (e.g. 8:00 AM, 9:00 AM)"
 
+        # Check: Response Style
         if not pref.response_style:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_RESPONSE_STYLE")
-            return "Do you prefer quick, standard, or detailed updates?"
+            return "Almost done! Do you prefer quick summaries, standard updates, or highly detailed financial deep-dives?"
 
-        # All fields are complete! Complete onboarding.
+        # 5. Onboarding is fully complete!
         UserService.update_user_onboarding_status(db, user.id, completed=True, state="COMPLETED")
 
+        # Generate a premium, personalized investment recap using Groq
         symbols_str = ", ".join([w.symbol for w in watchlists])
         topics_str = ", ".join([i.topic for i in interests])
         markets_str = ", ".join(pref.markets) if isinstance(pref.markets, list) else str(pref.markets)
 
+        prompt = (
+            f"User profile details:\n"
+            f"- Role: {pref.role}\n"
+            f"- Markets: {markets_str}\n"
+            f"- Watchlist: {symbols_str}\n"
+            f"- Interests: {topics_str}\n"
+            f"- Briefing: {pref.briefing_time}\n"
+            f"- Response Style: {pref.response_style}\n"
+        )
+        
+        try:
+            llm = LLMProvider()
+            recap = await llm.generate_response(prompt, system_prompt=RECAP_SYSTEM_PROMPT, fast=False)
+            if recap:
+                return (
+                    f"🎉 **Your assistant profile is set up!**\n\n"
+                    f"{recap}\n\n"
+                    f"Ask me about any company, market update, or financial topic to begin!"
+                )
+        except Exception as e:
+            logger.error(f"Failed to generate custom onboarding recap: {e}")
+
+        # Fallback recap if LLM fails
         return (
-            f"You're all set! Here is your personalized profile:\n\n"
-            f"• Role: {pref.role.replace('_', ' ').title()}\n"
-            f"• Markets: {markets_str}\n"
-            f"• Watchlist: {symbols_str}\n"
-            f"• Interests: {topics_str}\n"
-            f"• Daily Briefing: {pref.briefing_time}\n"
-            f"• Response Style: {pref.response_style.capitalize()}\n\n"
-            "I'll focus on the companies, markets, and topics you selected. "
-            "You can now ask me about any company, market update, or financial topic!"
+            f"🎉 **Your assistant profile is set up!**\n\n"
+            f"As your personal assistant, I will track *{symbols_str}* and monitor *{topics_str}* "
+            f"across the *{markets_str}* markets for you. I've scheduled your daily briefings for *{pref.briefing_time}*.\n\n"
+            f"Ask me about any company, market update, or financial topic to begin!"
         )

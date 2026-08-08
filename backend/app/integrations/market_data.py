@@ -88,7 +88,7 @@ class MarketDataProvider:
         )
         index_labels = (
             ["Nifty 50", "BSE Sensex"] if "INDIA" in market_upper
-            else ["S&P 500", "Nasdaq", "Dow Jones"]
+            else ["S&P 500", "Nasdaq Composite", "Dow Jones"]
         )
 
         indices = {}

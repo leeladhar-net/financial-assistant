@@ -89,7 +89,7 @@ class TelegramMessageHandler:
 
             # 4. Process response based on onboarding state
             if not user.onboarding_completed:
-                assistant_response = OnboardingService.process_onboarding_message(
+                assistant_response = await OnboardingService.process_onboarding_message(
                     db=db, user=user, message_text=clean_text
                 )
             else:
