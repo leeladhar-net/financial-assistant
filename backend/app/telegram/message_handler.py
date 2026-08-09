@@ -87,37 +87,8 @@ class TelegramMessageHandler:
                 message_type="text"
             )
 
-            # 4. Handle /language command
-            if clean_text.lower().startswith("/language"):
-                parts = clean_text.split()
-                if len(parts) < 2:
-                    pref = UserService.get_user_preferences(db, user.id)
-                    lang = pref.preferred_language or "English"
-                    msg = (
-                        f"🌐 *Language Settings*\n\n"
-                        f"Your current language is: *{lang}*\n\n"
-                        f"To change it, type `/language` followed by your language choice. For example:\n"
-                        f"• `/language English`\n"
-                        f"• `/language Hindi`\n"
-                        f"• `/language Telugu`\n"
-                        f"• `/language Spanish`\n"
-                        f"• `/language French`"
-                    )
-                    assistant_response = await OnboardingService.translate_text(msg, lang)
-                else:
-                    target_lang = parts[1].strip().title()
-                    valid_langs = ["English", "Hindi", "Telugu", "Spanish", "French"]
-                    if target_lang not in valid_langs:
-                        pref = UserService.get_user_preferences(db, user.id)
-                        lang = pref.preferred_language or "English"
-                        msg = f"Sorry, I don't support {target_lang} yet! Currently I support English, Hindi, Telugu, Spanish, and French."
-                        assistant_response = await OnboardingService.translate_text(msg, lang)
-                    else:
-                        UserService.update_user_preferences(db, user.id, preferred_language=target_lang)
-                        MemoryService.save_memory(db, user.id, "preferred_language", target_lang, memory_type="profile")
-                        msg = f"Got it! From now on, I will communicate with you in {target_lang}."
-                        assistant_response = await OnboardingService.translate_text(msg, target_lang)
-            elif not user.onboarding_completed:
+            # 4. Process response based on onboarding state
+            if not user.onboarding_completed:
                 assistant_response = await OnboardingService.process_onboarding_message(
                     db=db, user=user, message_text=clean_text
                 )

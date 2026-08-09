@@ -38,20 +38,7 @@ class OnboardingService:
             clarification = parsed.get("clarification") or "Sorry, I didn't quite catch that. Could you clarify that for me?"
             return clarification
 
-        # If brand new user and no info was parsed from the first message, ask the first question
-        if current_state == "NEW" and not parsed.get("role"):
-            UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_ROLE")
-            return (
-                "Hi! I'm your personal financial advisor. 💼\n\n"
-                "I'll help you track companies, global markets, and financial trends that align with your goals.\n\n"
-                "To get started, what best describes your current investment role or background? (e.g. retail investor, student, day trader, analyst)"
-            )
-
         # 3. Update DB records with extracted attributes
-        if parsed.get("preferred_language"):
-            UserService.update_user_preferences(db, user.id, preferred_language=parsed["preferred_language"])
-            MemoryService.save_memory(db, user.id, "preferred_language", parsed["preferred_language"], memory_type="profile")
-
         if parsed.get("role"):
             UserService.update_user_preferences(db, user.id, role=parsed["role"])
             MemoryService.save_memory(db, user.id, "role", parsed["role"], memory_type="profile")
@@ -80,17 +67,15 @@ class OnboardingService:
         pref = UserService.get_user_preferences(db, user.id)
         watchlists = user.watchlists
         interests = user.interests
-        target_lang = pref.preferred_language or "English"
 
         # If brand new user and no info was parsed from the first message, ask the first question
         if current_state == "NEW" and not parsed.get("role"):
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_ROLE")
-            welcome_msg = (
+            return (
                 "Hi! I'm your personal financial advisor. 💼\n\n"
                 "I'll help you track companies, global markets, and financial trends that align with your goals.\n\n"
                 "To get started, what best describes your current investment role or background? (e.g. retail investor, student, day trader, analyst)"
             )
-            return await OnboardingService.translate_text(welcome_msg, target_lang)
 
         # Determine next question dynamically in a human-like, conversational tone
         next_question = ""
@@ -128,7 +113,7 @@ class OnboardingService:
             next_question = "Almost done! Do you prefer quick summaries, standard updates, or highly detailed financial deep-dives?"
 
         if next_question:
-            return await OnboardingService.translate_text(next_question, target_lang)
+            return next_question
 
         # 5. Onboarding is fully complete!
         UserService.update_user_onboarding_status(db, user.id, completed=True, state="COMPLETED")
@@ -146,7 +131,6 @@ class OnboardingService:
             f"- Interests: {topics_str}\n"
             f"- Briefing: {pref.briefing_time}\n"
             f"- Response Style: {pref.response_style}\n"
-            f"Generate the recap in {target_lang}."
         )
         
         recap_content = ""
@@ -164,36 +148,13 @@ class OnboardingService:
                 f"across the *{markets_str}* markets for you. I've scheduled your daily briefings for *{pref.briefing_time}*."
             )
 
-        final_msg = (
+        return (
             f"🎉 **Your assistant profile is set up!**\n\n"
             f"{recap_content}\n\n"
             f"Ask me about any company, market update, or financial topic to begin!"
         )
-        return await OnboardingService.translate_text(final_msg, target_lang)
 
     @staticmethod
     async def translate_text(text: str, target_language: str) -> str:
-        """
-        Translates text into the target language using Groq LLM.
-        Keeps stock tickers and emojis intact.
-        """
-        if not target_language or target_language.lower() == "english":
-            return text
-        
-        prompt = (
-            f"Translate the following text into fluent, warm, natural {target_language}. "
-            f"If translating to Hindi or Telugu, write in their native script (Devanagari/Telugu script) "
-            f"but naturally leave common financial or interface words (like 'stock', 'price', 'portfolio', "
-            f"'watchlist', 'briefing', 'standard', 'detailed', 'quick') in English alphabet or phonetics "
-            f"if it sounds more natural and conversational (matching real-world Hinglish/Telglish speech).\n"
-            f"Do NOT change stock tickers (e.g. AAPL, NVDA, RELIANCE) or emojis.\n"
-            f"Return ONLY the translated text without any explanation or extra symbols:\n\n{text}"
-        )
-        try:
-            llm = LLMProvider()
-            translated = await llm.generate_response(prompt, system_prompt="You are a warm, helpful translator.", fast=True)
-            if translated:
-                return translated.strip()
-        except Exception as e:
-            logger.error(f"Failed translation to {target_language}: {e}")
+        """Fallback compatibility helper (always returns original English text)."""
         return text
