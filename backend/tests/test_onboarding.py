@@ -65,3 +65,49 @@ async def test_flexible_multi_field_onboarding(db_session):
     # System extracted role, markets, watchlists, interests automatically and jumps straight to briefing time!
     assert "briefing" in res.lower()
     assert user.onboarding_state == "ASK_BRIEFING_TIME"
+
+@pytest.mark.asyncio
+async def test_financial_query_during_onboarding(db_session):
+    from unittest.mock import patch, AsyncMock
+    from app.schemas.telegram import TelegramUpdate
+    from app.telegram.message_handler import TelegramMessageHandler
+    
+    # Create user at ASK_ROLE state
+    user = UserService.get_or_create_user(db_session, telegram_user_id=5003)
+    UserService.update_user_onboarding_status(db_session, user.id, completed=False, state="ASK_ROLE")
+    
+    raw_update = {
+        "update_id": 10002,
+        "message": {
+            "message_id": 56,
+            "from": {
+                "id": 5003,
+                "is_bot": False,
+                "first_name": "Charlie",
+                "username": "charlie_trader"
+            },
+            "chat": {
+                "id": 5003,
+                "type": "private"
+            },
+            "date": 1700000005,
+            "text": "what is the price of AAPL"
+        }
+    }
+    
+    update = TelegramUpdate.model_validate(raw_update)
+    
+    with patch("app.telegram.bot_client.TelegramBotClient.send_message", new_callable=AsyncMock) as mock_send:
+        mock_send.return_value = True
+        
+        response = await TelegramMessageHandler.process_update(db_session, update)
+        assert response is not None
+        # Check that it answered the stock price query
+        assert "AAPL" in response or "Apple" in response
+        # Check that it appended the onboarding role question
+        assert "what best describes your current investment role or background" in response
+        
+        # Ensure onboarding state is still ASK_ROLE (not mutated)
+        db_session.refresh(user)
+        assert user.onboarding_state == "ASK_ROLE"
+        assert user.onboarding_completed is False

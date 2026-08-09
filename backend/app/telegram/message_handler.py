@@ -87,11 +87,62 @@ class TelegramMessageHandler:
                 message_type="text"
             )
 
-            # 4. Process response based on onboarding state
+            # 4. Extract context and classify intent
+            import re
+            recent_msgs = ConversationService.get_recent_messages(db, conversation.id, limit=6)
+            last_symbol = None
+            stop_words = {"AND", "THE", "FOR", "INC", "CORP", "LTD", "PLC", "USA", "PM", "AM", "AI", "MA", "VS", "COMPARE", "PRICE", "NEWS"}
+            company_name_map = {
+                "nvidia": "NVDA", "microsoft": "MSFT", "google": "GOOGL",
+                "alphabet": "GOOGL", "apple": "AAPL", "amazon": "AMZN",
+                "tesla": "TSLA", "reliance": "RELIANCE", "tcs": "TCS", "hdfc": "HDFC"
+            }
+            for msg in reversed(recent_msgs):
+                # skip current user message
+                if msg.content.strip().lower() == clean_text.strip().lower() and msg.role == "user":
+                    continue
+                # find ticker
+                tickers = re.findall(r'\b[A-Z]{2,6}\b', msg.content)
+                for t in tickers:
+                    if t not in stop_words:
+                        last_symbol = t
+                        break
+                if last_symbol:
+                    break
+                # find company name
+                content_lower = msg.content.lower()
+                for comp, sym in company_name_map.items():
+                    if comp in content_lower:
+                        last_symbol = sym
+                        break
+                if last_symbol:
+                    break
+
+            logger.info(f"Context lookup resolved last_symbol={last_symbol}")
+
+            # Classify intent from natural text message
+            user_watchlists = [w.symbol for w in user.watchlists] if user.watchlists else []
+            intent_res = await IntentRouter.classify_intent(clean_text, user_watchlist=user_watchlists, last_symbol=last_symbol)
+
+            # 5. Process response based on onboarding state
             if not user.onboarding_completed:
-                assistant_response = await OnboardingService.process_onboarding_message(
-                    db=db, user=user, message_text=clean_text
-                )
+                # If they ask a stock/financial query during onboarding:
+                financial_intents = {"STOCK_QUOTE", "COMPANY_RESEARCH", "COMPANY_COMPARISON", "NEWS_SEARCH", "DECISION_ADVICE"}
+                if intent_res.intent in financial_intents or intent_res.primary_symbol is not None:
+                    logger.info(f"Intercepted financial query '{clean_text}' (intent={intent_res.intent}) during onboarding.")
+                    financial_response = await FinancialResearchAgent.process_financial_query(
+                        db, user.id, clean_text, intent_res
+                    )
+                    current_question = OnboardingService.get_current_onboarding_question(db, user)
+                    assistant_response = (
+                        f"{financial_response}\n\n"
+                        f"---\n"
+                        f"💬 *Onboarding Progress:* To help me finish setting up your profile, {current_question}"
+                    )
+                else:
+                    assistant_response = await OnboardingService.process_onboarding_message(
+                        db=db, user=user, message_text=clean_text
+                    )
             else:
                 # Check for Google Sheets Link
                 if "google.com/spreadsheets" in clean_text.lower() or "sheets.google.com" in clean_text.lower():
@@ -125,42 +176,7 @@ class TelegramMessageHandler:
                     rag_res = VectorStore.query_document_rag(db, user.id, clean_text)
                     assistant_response = rag_res.answer
                 else:
-                    # smart context lookup
-                    import re
-                    recent_msgs = ConversationService.get_recent_messages(db, conversation.id, limit=6)
-                    last_symbol = None
-                    stop_words = {"AND", "THE", "FOR", "INC", "CORP", "LTD", "PLC", "USA", "PM", "AM", "AI", "MA", "VS", "COMPARE", "PRICE", "NEWS"}
-                    company_name_map = {
-                        "nvidia": "NVDA", "microsoft": "MSFT", "google": "GOOGL",
-                        "alphabet": "GOOGL", "apple": "AAPL", "amazon": "AMZN",
-                        "tesla": "TSLA", "reliance": "RELIANCE", "tcs": "TCS", "hdfc": "HDFC"
-                    }
-                    for msg in reversed(recent_msgs):
-                        # skip current user message
-                        if msg.content.strip().lower() == clean_text.strip().lower() and msg.role == "user":
-                            continue
-                        # find ticker
-                        tickers = re.findall(r'\b[A-Z]{2,6}\b', msg.content)
-                        for t in tickers:
-                            if t not in stop_words:
-                                last_symbol = t
-                                break
-                        if last_symbol:
-                            break
-                        # find company name
-                        content_lower = msg.content.lower()
-                        for comp, sym in company_name_map.items():
-                            if comp in content_lower:
-                                last_symbol = sym
-                                break
-                        if last_symbol:
-                            break
-
-                    logger.info(f"Context lookup resolved last_symbol={last_symbol}")
-
-                    # Classify intent from natural text message
-                    user_watchlists = [w.symbol for w in user.watchlists] if user.watchlists else []
-                    intent_res = await IntentRouter.classify_intent(clean_text, user_watchlist=user_watchlists, last_symbol=last_symbol)
+                    # Already classified intent above, so process intents directly:
                     
                     if intent_res.intent == "GREETING":
                         if clean_text.lower() == "/start":

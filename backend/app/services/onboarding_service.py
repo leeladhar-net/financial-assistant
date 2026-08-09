@@ -155,6 +155,37 @@ class OnboardingService:
         )
 
     @staticmethod
+    def get_current_onboarding_question(db: Session, user: User) -> str:
+        """
+        Returns the onboarding question for the user's current missing preferences without mutating state.
+        """
+        pref = UserService.get_user_preferences(db, user.id)
+        watchlists = user.watchlists
+        interests = user.interests
+
+        if not pref or not pref.role:
+            return "what best describes your current investment role or background? (e.g. retail investor, student, day trader, analyst)"
+        
+        if not pref.markets or len(pref.markets) == 0:
+            role_title = pref.role.replace("_", " ").title()
+            return f"what markets or regions do you follow most closely? (e.g. US, India, Global Tech)"
+            
+        if not watchlists or len(watchlists) == 0:
+            markets_str = " and ".join(pref.markets) if isinstance(pref.markets, list) else str(pref.markets)
+            return f"which specific companies or stock tickers should I keep an eye on for you?"
+            
+        if not interests or len(interests) == 0:
+            return "when analyzing these stocks, what financial topics or events matter most to you? (e.g. AI, interest rates, earnings, inflation)"
+            
+        if not pref.briefing_time:
+            return "what time of day would you like to receive your personalized daily market briefing? (e.g. 8:00 AM, 9:00 AM)"
+            
+        if not pref.response_style:
+            return "do you prefer quick summaries, standard updates, or highly detailed financial deep-dives?"
+            
+        return "how can I help you today?"
+
+    @staticmethod
     async def translate_text(text: str, target_language: str) -> str:
         """Fallback compatibility helper (always returns original English text)."""
         return text
