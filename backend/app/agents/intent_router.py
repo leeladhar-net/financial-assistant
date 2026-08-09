@@ -30,7 +30,9 @@ class IntentRouter:
 
         prompt = (
             f"Identify any company mentioned in this text: \"{text_clean}\" "
-            f"and return only its standard ticker symbol (e.g. AAPL, TSLA, NFLX, TATASTEEL, INFY). "
+            f"and return only its standard ticker symbol. "
+            f"Important: For Indian companies, append '.NS' (e.g. 'Tata Steel' -> 'TATASTEEL.NS', 'Reliance' -> 'RELIANCE.NS', 'Wipro' -> 'WIPRO.NS', 'Infosys' -> 'INFY.NS'). "
+            f"For U.S. companies, return the ticker as is (e.g. 'Apple' -> 'AAPL', 'Netflix' -> 'NFLX'). "
             f"If no company is mentioned, reply with 'None'. Do not write any other text."
         )
 

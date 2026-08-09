@@ -94,6 +94,15 @@ class MarketDataProvider:
 
         try:
             hist = await asyncio.to_thread(fetch_history, resolved)
+            
+            # If not found and the symbol has no exchange suffix, retry with '.NS' suffix as fallback
+            if hist.empty and "." not in resolved and ":" not in resolved:
+                logger.info(f"Symbol '{resolved}' not found on Yahoo Finance. Retrying with '.NS' suffix...")
+                resolved_ns = resolved + ".NS"
+                hist = await asyncio.to_thread(fetch_history, resolved_ns)
+                if not hist.empty:
+                    resolved = resolved_ns
+                    
             if hist.empty:
                 return None
                 
