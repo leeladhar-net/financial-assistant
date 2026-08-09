@@ -40,40 +40,23 @@ class MarketDataProvider:
     @staticmethod
     def _resolve_yf_symbol(symbol: str) -> str:
         upper = symbol.strip().upper()
-        # If it has exchange prefix, handle it
+        # Handle prefix translations for backward compatibility
         if upper.startswith("BSE:"):
             symbol_raw = upper.replace("BSE:", "")
-            if symbol_raw == "TATAMOTORS":
+            if symbol_raw in ("TATAMOTORS", "TMCV"):
                 return "TMCV.BO"
             return symbol_raw + ".BO"
-        # If it has NSE: prefix, convert to .NS
         if upper.startswith("NSE:"):
             symbol_raw = upper.replace("NSE:", "")
-            if symbol_raw == "TATAMOTORS":
+            if symbol_raw in ("TATAMOTORS", "TMCV"):
                 return "TMCV.NS"
             return symbol_raw + ".NS"
             
-        # Map specific common tickers
-        ticker_map = {
-            "TATAMOTORS": "TMCV.NS",
-            "TATASTEEL": "TATASTEEL.NS",
-            "RELIANCE": "RELIANCE.NS",
-            "TCS": "TCS.NS",
-            "HDFC": "HDFCBANK.NS",
-            "HDFCBANK": "HDFCBANK.NS",
-            "INFY": "INFY.NS",
-            "WIPRO": "WIPRO.NS",
-            "INFOSYS": "INFY.NS",
-            "BAJFINANCE": "BAJFINANCE.NS",
-            "ICICIBANK": "ICICIBANK.NS",
-            "SBIN": "SBIN.NS",
-            "ADANIENT": "ADANIENT.NS"
-        }
-        if upper in ticker_map:
-            return ticker_map[upper]
-            
-        if upper.endswith(".NS") or upper.endswith(".BO"):
-            return upper
+        # Standardize old names to new names if query format was input directly
+        if upper == "TATAMOTORS":
+            return "TMCV.NS"
+        if upper == "ZOMATO":
+            return "ETERNAL.NS"
             
         return upper
 

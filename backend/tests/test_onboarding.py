@@ -71,6 +71,9 @@ async def test_financial_query_during_onboarding(db_session):
     from unittest.mock import patch, AsyncMock
     from app.schemas.telegram import TelegramUpdate
     from app.telegram.message_handler import TelegramMessageHandler
+    from app.core.config import settings
+    
+    settings.DEMO_MODE = True
     
     # Create user at ASK_ROLE state
     user = UserService.get_or_create_user(db_session, telegram_user_id=5003)

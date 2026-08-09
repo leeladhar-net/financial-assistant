@@ -52,14 +52,11 @@ class PortfolioService:
             if not data.get("is_transaction"):
                 return None
 
-            # Resolve ticker
-            raw_sym = data["symbol"].upper()
-            resolved_sym = MarketDataProvider._resolve_symbol(raw_sym)
-            if resolved_sym.startswith("BSE:"):
-                # Standardize to short symbol for display in portfolio
-                symbol_display = raw_sym
-            else:
-                symbol_display = raw_sym
+            # Resolve ticker to canonical ticker using mapping engine
+            from app.services.mapping_engine import CompanyMappingEngine
+            raw_sym = data["symbol"]
+            instrument = await CompanyMappingEngine.resolve_instrument(raw_sym)
+            symbol_display = instrument.ticker if instrument else raw_sym.upper()
 
             # Log transaction in DB
             txn = PortfolioTransaction(

@@ -2,9 +2,11 @@ import pytest
 from sqlalchemy.orm import Session
 from app.services.user_service import UserService
 from app.agents import IntentRouter, FinancialResearchAgent
+from app.core.config import settings
 
 @pytest.mark.asyncio
 async def test_financial_agent_processing(db_session: Session):
+    settings.DEMO_MODE = True
     # Setup completed user with watchlist
     user = UserService.get_or_create_user(db_session, telegram_user_id=9901)
     UserService.update_user_preferences(db_session, user.id, role="retail_investor", markets=["US"])

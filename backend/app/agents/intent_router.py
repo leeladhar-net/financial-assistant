@@ -15,41 +15,37 @@ class IntentRouter:
     @staticmethod
     async def resolve_company_to_symbol_llm(text: str) -> Optional[str]:
         """
-        Uses Groq LLM to extract a company name from text and resolve it to a standard ticker symbol.
+        Uses CompanyMappingEngine to resolve a company name from text to its standard stock symbol.
         """
-        if not settings.LLM_API_KEY:
-            return None
+        from app.services.mapping_engine import CompanyMappingEngine
 
         # Clean query
-        text_clean = text.strip()
+        query = text.strip()
         
-        # Avoid calling LLM for simple greetings, commands, or watchlist lookups
+        # Avoid calling resolver for simple greetings, commands, or watchlist lookups
         greetings = {"hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening", "/start"}
-        if text_clean.lower() in greetings or text_clean.startswith("/"):
+        if query.lower() in greetings or query.startswith("/"):
             return None
 
-        prompt = (
-            f"Identify any company mentioned in this text: \"{text_clean}\" "
-            f"and return only its standard ticker symbol. "
-            f"Important Notes for Specific Corporate Renames:\n"
-            f"- Zomato -> ETERNAL.NS (Zomato was renamed to Eternal Ltd in March 2025)\n"
-            f"- Tata Motors -> TMCV.NS (Tata Motors was split and commercial ticker is TMCV)\n"
-            f"- For other Indian companies, append '.NS' (e.g. 'Tata Steel' -> 'TATASTEEL.NS', 'Reliance' -> 'RELIANCE.NS', 'Wipro' -> 'WIPRO.NS').\n"
-            f"- For U.S. companies, return the ticker as is (e.g. 'Apple' -> 'AAPL', 'Netflix' -> 'NFLX').\n"
-            f"If no company is mentioned, reply with 'None'. Do not write any other text."
-        )
+        # Clean standard patterns to extract the company name for optimal search matching
+        patterns = [
+            r'^what is the price of ', r'^what is price of ', r'^price of ',
+            r'^cost of ', r'^share price of ', r'^stock price of ',
+            r'^get news on ', r'^news on ', r'^analyze ', r'^research '
+        ]
+        for pat in patterns:
+            query = re.sub(pat, '', query, flags=re.IGNORECASE)
+        
+        # Clean trailing share/stock/share price terms
+        query = re.sub(r'\b(share price|stock price|share|stock|price)\b', '', query, flags=re.IGNORECASE).strip()
+        
+        if not query:
+            return None
 
-        try:
-            llm = LLMProvider()
-            response_text = await llm.generate_response(prompt, system_prompt="You are a stock symbol resolver. Reply with the symbol only or 'None'.", fast=True)
-            if response_text:
-                symbol = response_text.strip().upper().replace(" ", "")
-                # Clean punctuation
-                symbol = re.sub(r'[^\w\.\:]', '', symbol)
-                if symbol and symbol != "NONE" and len(symbol) <= 12:
-                    return symbol
-        except Exception as e:
-            logger.warning(f"Selective LLM symbol resolution failed: {e}")
+        instrument = await CompanyMappingEngine.resolve_instrument(query)
+        if instrument:
+            # We return the ticker (which includes suffixes like .NS)
+            return instrument.ticker
         return None
 
     @staticmethod
@@ -106,7 +102,16 @@ class IntentRouter:
                 found_symbols.append(sym)
 
         # Selective LLM Symbol Resolution: If no symbols found, run LLM resolution
-        if not found_symbols:
+        # But skip resolution if it is a referential query (using pronouns) or a short follow-up
+        is_referential = False
+        if last_symbol:
+            pronouns = ["it", "its", "their", "them", "this stock", "that stock", "company", "they"]
+            is_pronoun_query = any(p in text_lower for p in pronouns)
+            is_short_follow_up = len(text.strip().split()) <= 3 and any(kw in text_lower for kw in ["price", "quote", "news", "earnings", "chart"])
+            if is_pronoun_query or is_short_follow_up:
+                is_referential = True
+
+        if not found_symbols and not is_referential:
             llm_symbol = await IntentRouter.resolve_company_to_symbol_llm(text)
             if llm_symbol:
                 found_symbols = [llm_symbol]
