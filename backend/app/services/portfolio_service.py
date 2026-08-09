@@ -120,7 +120,7 @@ class PortfolioService:
 
             # Fetch live quote
             quote = await MarketDataProvider.get_stock_quote(symbol)
-            current_price = quote.price
+            current_price = quote.price if quote else avg_buy_price
             market_value = current_price * net_qty
             pnl_amount = market_value - total_cost
             pnl_percent = (pnl_amount / total_cost) * 100 if total_cost > 0 else 0.0

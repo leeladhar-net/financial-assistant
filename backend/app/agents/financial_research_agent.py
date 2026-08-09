@@ -45,6 +45,13 @@ class FinancialResearchAgent:
         if intent in ("DECISION_ADVICE", "STOCK_QUOTE", "COMPANY_RESEARCH"):
             symbol = intent_result.primary_symbol or "NVDA"
             quote = await MarketDataProvider.get_stock_quote(symbol)
+            if not quote:
+                return (
+                    f"🔍 *Market Data Lookup Failed*\n\n"
+                    f"I couldn't retrieve official live market data for *{symbol}*. "
+                    f"Please verify if the stock ticker or company name is correct and currently listed on the stock exchange."
+                )
+
             news_items = await MarketDataProvider.get_company_news(symbol, limit=3)
             
             # Setup automated alert triggers in background

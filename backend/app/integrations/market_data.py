@@ -169,15 +169,19 @@ class MarketDataProvider:
         if yf_quote:
             return yf_quote
 
-        # 3. Fallback demo data
-        return MarketDataProvider._demo_quote(clean_sym)
+        # 3. Fallback demo data ONLY if DEMO_MODE is True
+        if settings.DEMO_MODE:
+            return MarketDataProvider._demo_quote(clean_sym)
+            
+        return None
 
     @staticmethod
     async def get_multiple_quotes(symbols: List[str]) -> List[StockQuote]:
         quotes = []
         for sym in symbols:
             q = await MarketDataProvider.get_stock_quote(sym)
-            quotes.append(q)
+            if q:
+                quotes.append(q)
         return quotes
 
     @staticmethod
