@@ -46,6 +46,17 @@ class IntentRouter:
             "reliance": "RELIANCE",
             "tcs": "TCS",
             "hdfc": "HDFC",
+            "tata steel": "TATASTEEL",
+            "tata motors": "TATAMOTORS",
+            "infosys": "INFY",
+            "wipro": "WIPRO",
+            "sbi": "SBIN",
+            "state bank": "SBIN",
+            "icici": "ICICIBANK",
+            "adani": "ADANIENT",
+            "meta": "META",
+            "netflix": "NFLX",
+            "intel": "INTC",
         }
         for comp, sym in company_name_map.items():
             if comp in text_lower and sym not in found_symbols:
@@ -79,11 +90,13 @@ class IntentRouter:
         # 4. Smart Context: Inject last_symbol if no symbol is explicitly found
         using_context = False
         if not found_symbols and last_symbol:
-            # If they use pronouns / referential terms OR if it's a context-dependent query
             pronouns = ["it", "its", "their", "them", "this stock", "that stock", "company", "they"]
-            query_keywords = ["price", "quote", "stock", "news", "headline", "earnings", "m&a", "merger", "buy", "sell", "hold"]
+            is_pronoun_query = any(p in text_lower for p in pronouns)
             
-            if any(p in text_lower for p in pronouns) or any(kw in text_lower for kw in query_keywords):
+            # Simple short follow-ups like "price?", "news?", "chart?"
+            is_short_follow_up = len(text.strip().split()) <= 3 and any(kw in text_lower for kw in ["price", "quote", "news", "earnings", "chart"])
+            
+            if is_pronoun_query or is_short_follow_up:
                 found_symbols = [last_symbol]
                 using_context = True
                 logger.info(f"Context memory activated: resolved referential query using last_symbol='{last_symbol}'")

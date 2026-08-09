@@ -26,3 +26,9 @@ def test_context_memory_intent_resolution():
     assert r4.intent == "COMPANY_COMPARISON"
     assert "MSFT" in r4.symbols
     assert "GOOGL" in r4.symbols
+
+    # Scenario 5: User asks about another company name explicitly (e.g. "Tata Steel") with context "NVDA"
+    # Should resolve to TATASTEEL and not get hijacked by NVDA context
+    r5 = IntentRouter.classify_intent("what is price of tata steel", last_symbol="NVDA")
+    assert r5.primary_symbol == "TATASTEEL"
+    assert r5.symbols == ["TATASTEEL"]

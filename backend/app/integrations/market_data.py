@@ -22,6 +22,7 @@ SYMBOL_MAP = {
     "ICICIBANK":  "BSE:ICICIBANK",
     "SBIN":       "BSE:SBIN",
     "ADANIENT":   "BSE:ADANIENT",
+    "TATASTEEL":  "BSE:TATASTEEL",
 }
 
 class MarketDataProvider:
