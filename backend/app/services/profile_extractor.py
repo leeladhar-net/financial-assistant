@@ -63,7 +63,9 @@ class ProfileExtractorService:
         """
         Uses Groq LLM to parse and validate onboarding responses in a friendly, conversational manner.
         """
-        if current_state == "NEW":
+        greetings = {"hi", "hello", "hey", "hola", "greetings", "/start"}
+        is_greeting = text.strip().lower() in greetings or text.strip().startswith("/")
+        if current_state == "NEW" and is_greeting:
             return ProfileExtractorService.extract_profile_info_fallback(text, current_state)
 
         if not text or not settings.LLM_API_KEY:
@@ -105,6 +107,11 @@ class ProfileExtractorService:
             "clarification": "",
             "role": None, "markets": None, "watchlist": None, "interests": None, "briefing_time": None, "response_style": None
         }
+
+        # If it looks like a financial query or start command, it is not a valid onboarding answer
+        financial_keywords = ["price", "quote", "stock", "news", "earnings", "watchlist", "portfolio", "analyze", "?", "what is"]
+        if any(kw in text_lower for kw in financial_keywords) or re.search(r'\b[A-Z]{2,6}\b', text):
+            extracted["is_valid"] = False
 
         # 1. Extract Role
         role_map = {

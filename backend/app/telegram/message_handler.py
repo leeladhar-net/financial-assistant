@@ -120,30 +120,49 @@ class TelegramMessageHandler:
 
             logger.info(f"Context lookup resolved last_symbol={last_symbol}")
 
-            # Classify intent from natural text message
-            user_watchlists = [w.symbol for w in user.watchlists] if user.watchlists else []
-            intent_res = await IntentRouter.classify_intent(clean_text, user_watchlist=user_watchlists, last_symbol=last_symbol)
-
             # 5. Process response based on onboarding state
             if not user.onboarding_completed:
-                # If they ask a stock/financial query during onboarding:
-                financial_intents = {"STOCK_QUOTE", "COMPANY_RESEARCH", "COMPANY_COMPARISON", "NEWS_SEARCH", "DECISION_ADVICE"}
-                if intent_res.intent in financial_intents or intent_res.primary_symbol is not None:
-                    logger.info(f"Intercepted financial query '{clean_text}' (intent={intent_res.intent}) during onboarding.")
-                    financial_response = await FinancialResearchAgent.process_financial_query(
-                        db, user.id, clean_text, intent_res
-                    )
-                    current_question = OnboardingService.get_current_onboarding_question(db, user)
-                    assistant_response = (
-                        f"{financial_response}\n\n"
-                        f"---\n"
-                        f"💬 *Onboarding Progress:* To help me finish setting up your profile, {current_question}"
+                # Run profile extractor on the message first to verify if it's a valid onboarding answer
+                current_state = user.onboarding_state or "NEW"
+                
+                # Fetch conversation history to pass as context
+                conv = ConversationService.get_or_create_active_conversation(db, user.id)
+                recent_msgs = ConversationService.get_recent_messages(db, conv.id, limit=5)
+                history = [f"{m.role.upper()}: {m.content}" for m in recent_msgs]
+                
+                from app.services.profile_extractor import ProfileExtractorService
+                parsed = await ProfileExtractorService.extract_profile_info_llm(clean_text, current_state, history)
+                
+                if parsed.get("is_valid", True):
+                    # Valid onboarding response, let onboarding service process and save it
+                    assistant_response = await OnboardingService.process_onboarding_message(
+                        db=db, user=user, message_text=clean_text, pre_parsed=parsed
                     )
                 else:
-                    assistant_response = await OnboardingService.process_onboarding_message(
-                        db=db, user=user, message_text=clean_text
-                    )
+                    # Classify intent to see if it is a financial query intercept
+                    user_watchlists = [w.symbol for w in user.watchlists] if user.watchlists else []
+                    intent_res = await IntentRouter.classify_intent(clean_text, user_watchlist=user_watchlists, last_symbol=last_symbol)
+                    
+                    financial_intents = {"STOCK_QUOTE", "COMPANY_RESEARCH", "COMPANY_COMPARISON", "NEWS_SEARCH", "DECISION_ADVICE"}
+                    if intent_res.intent in financial_intents or intent_res.primary_symbol is not None:
+                        logger.info(f"Intercepted financial query '{clean_text}' (intent={intent_res.intent}) during onboarding.")
+                        financial_response = await FinancialResearchAgent.process_financial_query(
+                            db, user.id, clean_text, intent_res
+                        )
+                        current_question = OnboardingService.get_current_onboarding_question(db, user)
+                        assistant_response = (
+                            f"{financial_response}\n\n"
+                            f"---\n"
+                            f"💬 *Onboarding Progress:* To help me finish setting up your profile, {current_question}"
+                        )
+                    else:
+                        # Return the onboarding validation clarification message
+                        assistant_response = parsed.get("clarification") or "Sorry, I didn't quite catch that. Could you clarify?"
             else:
+                # Classify intent from natural text message
+                user_watchlists = [w.symbol for w in user.watchlists] if user.watchlists else []
+                intent_res = await IntentRouter.classify_intent(clean_text, user_watchlist=user_watchlists, last_symbol=last_symbol)
+
                 # Check for Google Sheets Link
                 if "google.com/spreadsheets" in clean_text.lower() or "sheets.google.com" in clean_text.lower():
                     from app.integrations.google import GoogleSheetsService

@@ -69,10 +69,18 @@ class LLMProvider:
             "temperature": 0.4
         }
         async with httpx.AsyncClient(timeout=15.0) as client:
-            res = await client.post(url, json=payload, headers=headers)
-            if res.status_code == 200:
-                return res.json()["choices"][0]["message"]["content"].strip()
-            logger.error(f"Groq API error {res.status_code}: {res.text}")
+            for attempt in range(4):
+                res = await client.post(url, json=payload, headers=headers)
+                if res.status_code == 200:
+                    return res.json()["choices"][0]["message"]["content"].strip()
+                elif res.status_code == 429:
+                    logger.warning(f"Groq API 429 Rate Limit. Retrying in 1.5 seconds (attempt {attempt+1}/4)...")
+                    import asyncio
+                    await asyncio.sleep(1.5)
+                    continue
+                else:
+                    logger.error(f"Groq API error {res.status_code}: {res.text}")
+                    return None
             return None
 
     async def _call_openai(self, prompt: str, system_prompt: str) -> Optional[str]:
