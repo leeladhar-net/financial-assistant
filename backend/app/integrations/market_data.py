@@ -38,10 +38,97 @@ class MarketDataProvider:
         return SYMBOL_MAP.get(upper, upper)
 
     @staticmethod
+    def _resolve_yf_symbol(symbol: str) -> str:
+        upper = symbol.strip().upper()
+        # If it has exchange prefix, handle it
+        if upper.startswith("BSE:"):
+            symbol_raw = upper.replace("BSE:", "")
+            if symbol_raw == "TATAMOTORS":
+                return "TMCV.BO"
+            return symbol_raw + ".BO"
+        # If it has NSE: prefix, convert to .NS
+        if upper.startswith("NSE:"):
+            symbol_raw = upper.replace("NSE:", "")
+            if symbol_raw == "TATAMOTORS":
+                return "TMCV.NS"
+            return symbol_raw + ".NS"
+            
+        # Map specific common tickers
+        ticker_map = {
+            "TATAMOTORS": "TMCV.NS",
+            "TATASTEEL": "TATASTEEL.NS",
+            "RELIANCE": "RELIANCE.NS",
+            "TCS": "TCS.NS",
+            "HDFC": "HDFCBANK.NS",
+            "HDFCBANK": "HDFCBANK.NS",
+            "INFY": "INFY.NS",
+            "WIPRO": "WIPRO.NS",
+            "INFOSYS": "INFY.NS",
+            "BAJFINANCE": "BAJFINANCE.NS",
+            "ICICIBANK": "ICICIBANK.NS",
+            "SBIN": "SBIN.NS",
+            "ADANIENT": "ADANIENT.NS"
+        }
+        if upper in ticker_map:
+            return ticker_map[upper]
+            
+        if upper.endswith(".NS") or upper.endswith(".BO"):
+            return upper
+            
+        return upper
+
+    @staticmethod
+    async def get_stock_quote_yfinance(symbol: str) -> Optional[StockQuote]:
+        """
+        Fetches stock quote from Yahoo Finance using yfinance library as a high-fidelity fallback.
+        """
+        import asyncio
+        import yfinance as yf
+        
+        clean_sym = symbol.strip().upper()
+        resolved = MarketDataProvider._resolve_yf_symbol(clean_sym)
+
+        def fetch_history(ticker_sym):
+            ticker = yf.Ticker(ticker_sym)
+            return ticker.history(period="2d")
+
+        try:
+            hist = await asyncio.to_thread(fetch_history, resolved)
+            if hist.empty:
+                return None
+                
+            latest = hist.iloc[-1]
+            price = latest["Close"]
+            
+            if len(hist) >= 2:
+                prev_close = hist.iloc[-2]["Close"]
+            else:
+                prev_close = latest["Open"]
+                
+            change_amount = price - prev_close
+            change_percent = (change_amount / prev_close) * 100 if prev_close else 0.0
+            
+            return StockQuote(
+                symbol=clean_sym,
+                price=round(price, 2),
+                change_amount=round(change_amount, 2),
+                change_percent=round(change_percent, 2),
+                high=round(latest["High"], 2),
+                low=round(latest["Low"], 2),
+                open=round(latest["Open"], 2),
+                prev_close=round(prev_close, 2),
+                source="Yahoo Finance"
+            )
+        except Exception as e:
+            logger.warning(f"Yahoo Finance quote failed for {resolved}: {e}")
+            return None
+
+    @staticmethod
     async def get_stock_quote(symbol: str) -> StockQuote:
         clean_sym = symbol.strip().upper()
         resolved = MarketDataProvider._resolve_symbol(clean_sym)
 
+        # 1. Try Finnhub quote first (if API key is present)
         if settings.FINNHUB_API_KEY:
             try:
                 url = f"{FINNHUB_BASE}/quote"
@@ -50,7 +137,6 @@ class MarketDataProvider:
                     res = await client.get(url, params=params)
                     if res.status_code == 200:
                         data = res.json()
-                        # c=current, d=change, dp=change%, h=high, l=low, o=open, pc=prev close
                         price = data.get("c", 0)
                         if price and price > 0:
                             return StockQuote(
@@ -65,11 +151,16 @@ class MarketDataProvider:
                                 source="Finnhub Live"
                             )
                         else:
-                            logger.warning(f"Finnhub returned zero price for {resolved}. May be invalid symbol or market closed.")
+                            logger.warning(f"Finnhub returned zero price for {resolved}. Checking Yahoo Finance fallback.")
             except Exception as e:
                 logger.warning(f"Finnhub quote failed for {resolved}: {e}")
 
-        # Fallback demo data
+        # 2. Try Yahoo Finance fallback
+        yf_quote = await MarketDataProvider.get_stock_quote_yfinance(clean_sym)
+        if yf_quote:
+            return yf_quote
+
+        # 3. Fallback demo data
         return MarketDataProvider._demo_quote(clean_sym)
 
     @staticmethod
