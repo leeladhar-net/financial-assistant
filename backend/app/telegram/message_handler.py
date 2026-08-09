@@ -125,14 +125,98 @@ class TelegramMessageHandler:
                     rag_res = VectorStore.query_document_rag(db, user.id, clean_text)
                     assistant_response = rag_res.answer
                 else:
+                    # smart context lookup
+                    import re
+                    recent_msgs = ConversationService.get_recent_messages(db, conversation.id, limit=6)
+                    last_symbol = None
+                    stop_words = {"AND", "THE", "FOR", "INC", "CORP", "LTD", "PLC", "USA", "PM", "AM", "AI", "MA", "VS", "COMPARE", "PRICE", "NEWS"}
+                    company_name_map = {
+                        "nvidia": "NVDA", "microsoft": "MSFT", "google": "GOOGL",
+                        "alphabet": "GOOGL", "apple": "AAPL", "amazon": "AMZN",
+                        "tesla": "TSLA", "reliance": "RELIANCE", "tcs": "TCS", "hdfc": "HDFC"
+                    }
+                    for msg in reversed(recent_msgs):
+                        # skip current user message
+                        if msg.content.strip().lower() == clean_text.strip().lower() and msg.role == "user":
+                            continue
+                        # find ticker
+                        tickers = re.findall(r'\b[A-Z]{2,6}\b', msg.content)
+                        for t in tickers:
+                            if t not in stop_words:
+                                last_symbol = t
+                                break
+                        if last_symbol:
+                            break
+                        # find company name
+                        content_lower = msg.content.lower()
+                        for comp, sym in company_name_map.items():
+                            if comp in content_lower:
+                                last_symbol = sym
+                                break
+                        if last_symbol:
+                            break
+
+                    logger.info(f"Context lookup resolved last_symbol={last_symbol}")
+
                     # Classify intent from natural text message
                     user_watchlists = [w.symbol for w in user.watchlists] if user.watchlists else []
-                    intent_res = IntentRouter.classify_intent(clean_text, user_watchlist=user_watchlists)
+                    intent_res = IntentRouter.classify_intent(clean_text, user_watchlist=user_watchlists, last_symbol=last_symbol)
                     
-                    # Execute Financial Research Agent
-                    assistant_response = await FinancialResearchAgent.process_financial_query(
-                        db=db, user_id=user.id, user_message=clean_text, intent_result=intent_res
-                    )
+                    if intent_res.intent == "PORTFOLIO_ADD":
+                        from app.services.portfolio_service import PortfolioService
+                        txn = await PortfolioService.parse_and_log_transaction(db, user.id, clean_text)
+                        if txn:
+                            emoji = "📈" if txn.transaction_type == "BUY" else "📉"
+                            assistant_response = (
+                                f"{emoji} *Logged Trade transaction:*\n\n"
+                                f"• *Symbol*: {txn.symbol}\n"
+                                f"• *Action*: {txn.transaction_type}\n"
+                                f"• *Quantity*: {txn.quantity}\n"
+                                f"• *Price*: ${txn.price:.2f}\n\n"
+                                f"Successfully added transaction. Type `portfolio` to view your live profit/loss!"
+                            )
+                        else:
+                            assistant_response = (
+                                "Sorry, I couldn't extract all transaction details. "
+                                "Please log it like: *'Bought 10 AAPL at $175'* or *'sold 5 TSLA at $210'*."
+                            )
+                    elif intent_res.intent == "PORTFOLIO_VIEW":
+                        from app.services.portfolio_service import PortfolioService
+                        portfolio = await PortfolioService.get_portfolio_summary(db, user.id)
+                        if not portfolio.holdings:
+                            assistant_response = (
+                                "💼 *Your Portfolio is empty!*\n\n"
+                                "You haven't logged any trades yet. Try typing something like:\n"
+                                "• *'Bought 10 shares of AAPL at $175'*\n"
+                                "• *'Sold 5 TSLA at $210'*"
+                            )
+                        else:
+                            holding_bullets = []
+                            for h in portfolio.holdings:
+                                change_sign = "+" if h.pnl_amount >= 0 else ""
+                                pnl_color_emoji = "🟢" if h.pnl_amount >= 0 else "🔴"
+                                holding_bullets.append(
+                                    f"• *{h.symbol}*: {h.quantity:.1f} shares @ avg ${h.avg_buy_price:.2f}\n"
+                                    f"  Live: *${h.current_price:.2f}* | P&L: {pnl_color_emoji} *{change_sign}${h.pnl_amount:.2f}* ({change_sign}{h.pnl_percent:.2f}%)"
+                                )
+                            holdings_str = "\n\n".join(holding_bullets)
+                            
+                            total_sign = "+" if portfolio.total_pnl_amount >= 0 else ""
+                            summary_pnl_emoji = "🟢" if portfolio.total_pnl_amount >= 0 else "🔴"
+                            
+                            assistant_response = (
+                                f"💼 *Your Investment Portfolio*\n\n"
+                                f"{holdings_str}\n\n"
+                                f"━━━━━━━━━━━━━━━━━━━━\n"
+                                f"• *Total Cost Basis*: ${portfolio.total_cost:.2f}\n"
+                                f"• *Current Market Value*: ${portfolio.total_value:.2f}\n"
+                                f"• *Total Portfolio P&L*: {summary_pnl_emoji} *{total_sign}${portfolio.total_pnl_amount:.2f}* ({total_sign}{portfolio.total_pnl_percent:.2f}%)"
+                            )
+                    else:
+                        # Execute Financial Research Agent
+                        assistant_response = await FinancialResearchAgent.process_financial_query(
+                            db=db, user_id=user.id, user_message=clean_text, intent_result=intent_res
+                        )
 
             # 5. Save assistant response
             ConversationService.save_message(

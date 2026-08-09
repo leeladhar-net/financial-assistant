@@ -5,6 +5,7 @@ from app.models.memory import UserMemory
 from app.models.financial_event import FinancialEvent, NotificationHistory
 from app.models.document import Document, DocumentChunk, IntegrationToken
 from app.models.proactive_alert import ProactiveAlert
+from app.models.portfolio import PortfolioTransaction
 
 __all__ = [
     "User",
@@ -20,4 +21,5 @@ __all__ = [
     "DocumentChunk",
     "IntegrationToken",
     "ProactiveAlert",
+    "PortfolioTransaction",
 ]

@@ -90,12 +90,13 @@ class BriefingScheduler:
     @staticmethod
     async def run_scheduled_briefings(db: Session) -> int:
         """
-        Executes daily briefing run for all completed users.
+        Executes daily briefing run and earnings checks for all completed users.
         """
         users = db.query(User).filter(User.onboarding_completed == True).all()
         sent_count = 0
         bot_client = TelegramBotClient()
 
+        # 1. Dispatch briefings
         for user in users:
             briefing = await BriefingScheduler.generate_user_daily_briefing(db, user.id)
             if briefing:
@@ -105,5 +106,65 @@ class BriefingScheduler:
                         db=db, user_id=user.id, content=briefing, notification_type="daily_briefing"
                     )
                     sent_count += 1
+
+        # 2. Dispatch earnings calendar alerts
+        await BriefingScheduler.check_upcoming_earnings_alerts(db)
+
         logger.info(f"Completed scheduled briefing run. Sent briefings to {sent_count} user(s).")
         return sent_count
+
+    @staticmethod
+    async def check_upcoming_earnings_alerts(db: Session) -> int:
+        """
+        Scans watchlists of completed users and dispatches proactive earnings calendar alerts.
+        """
+        from datetime import date
+        from app.models.financial_event import NotificationHistory
+        
+        users = db.query(User).filter(User.onboarding_completed == True).all()
+        sent_alerts = 0
+        bot_client = TelegramBotClient()
+        today = date.today()
+
+        for user in users:
+            watchlisted_symbols = [w.symbol for w in user.watchlists]
+            for symbol in watchlisted_symbols:
+                earnings_date_str = await MarketDataProvider.get_upcoming_earnings(symbol, days_window=7)
+                if not earnings_date_str:
+                    continue
+
+                try:
+                    earnings_date = date.fromisoformat(earnings_date_str)
+                    days_until = (earnings_date - today).days
+                    
+                    # Alert if earnings are in 0 to 2 days
+                    if 0 <= days_until <= 2:
+                        notification_type = f"earnings_alert_{symbol}_{earnings_date_str}"
+                        
+                        # Check if already sent
+                        already_sent = db.query(NotificationHistory).filter(
+                            NotificationHistory.user_id == user.id,
+                            NotificationHistory.notification_type == notification_type
+                        ).first()
+
+                        if not already_sent:
+                            alert_msg = (
+                                f"📅 *Upcoming Earnings Alert*:\n\n"
+                                f"*{symbol}* is reporting quarterly earnings on *{earnings_date_str}* "
+                                f"({days_until} day(s) from now).\n\n"
+                                f"Would you like me to compile a pre-earnings research brief on analysts' expectations or sentiment for {symbol}?"
+                            )
+                            success = await bot_client.send_message(chat_id=user.telegram_user_id, text=alert_msg)
+                            if success:
+                                RelevanceEngine.record_notification_sent(
+                                    db=db,
+                                    user_id=user.id,
+                                    content=alert_msg,
+                                    notification_type=notification_type
+                                )
+                                sent_alerts += 1
+                except Exception as e:
+                    logger.error(f"Error checking earnings alert for user_id={user.id}, symbol={symbol}: {e}")
+
+        logger.info(f"Completed earnings calendar checks. Dispatched {sent_alerts} alert(s).")
+        return sent_alerts

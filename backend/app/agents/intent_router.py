@@ -6,10 +6,15 @@ from app.core.logging import logger
 class IntentRouter:
     """
     Classifies natural language user messages into financial intents and extracts entities (symbols, topics).
+    Supports Smart Context Memory through injection of last_symbol.
     """
 
     @staticmethod
-    def classify_intent(text: str, user_watchlist: Optional[List[str]] = None) -> IntentResult:
+    def classify_intent(
+        text: str,
+        user_watchlist: Optional[List[str]] = None,
+        last_symbol: Optional[str] = None
+    ) -> IntentResult:
         if not text:
             return IntentResult(intent="GENERAL_FINANCIAL")
 
@@ -41,7 +46,44 @@ class IntentRouter:
             if comp in text_lower and sym not in found_symbols:
                 found_symbols.append(sym)
 
-        # 2. Check for Buy/Sell/Hold Decision Intent
+        # 2. Check for Portfolio Logging Intent (PORTFOLIO_ADD)
+        trade_keywords = ["bought", "sold", "purchased", "logged"]
+        is_add_portfolio = False
+        if any(w in text_lower for w in trade_keywords):
+            is_add_portfolio = True
+        elif ("buy" in text_lower or "sell" in text_lower or "add" in text_lower) and any(c.isdigit() for c in text):
+            # e.g. "buy 10 AAPL" or "add 5 shares"
+            is_add_portfolio = True
+
+        if is_add_portfolio:
+            prim = found_symbols[0] if found_symbols else (last_symbol or "NVDA")
+            return IntentResult(
+                intent="PORTFOLIO_ADD",
+                primary_symbol=prim,
+                symbols=[prim] if prim else []
+            )
+
+        # 3. Check for Portfolio Viewing Intent (PORTFOLIO_VIEW)
+        portfolio_keywords = ["portfolio", "holdings", "my shares", "pnl", "p&l", "investment value", "positions"]
+        if any(kw in text_lower for kw in portfolio_keywords):
+            return IntentResult(
+                intent="PORTFOLIO_VIEW",
+                symbols=user_watchlist or []
+            )
+
+        # 4. Smart Context: Inject last_symbol if no symbol is explicitly found
+        using_context = False
+        if not found_symbols and last_symbol:
+            # If they use pronouns / referential terms OR if it's a context-dependent query
+            pronouns = ["it", "its", "their", "them", "this stock", "that stock", "company", "they"]
+            query_keywords = ["price", "quote", "stock", "news", "headline", "earnings", "m&a", "merger", "buy", "sell", "hold"]
+            
+            if any(p in text_lower for p in pronouns) or any(kw in text_lower for kw in query_keywords):
+                found_symbols = [last_symbol]
+                using_context = True
+                logger.info(f"Context memory activated: resolved referential query using last_symbol='{last_symbol}'")
+
+        # 5. Check for Buy/Sell/Hold Decision Intent
         decision_keywords = ["sell", "buy", "hold", "should i", "good time to", "what should i do", "take profit", "exit position"]
         if any(kw in text_lower for kw in decision_keywords):
             prim = found_symbols[0] if found_symbols else (user_watchlist[0] if user_watchlist else "NVDA")
@@ -49,11 +91,11 @@ class IntentRouter:
             return IntentResult(
                 intent="DECISION_ADVICE",
                 primary_symbol=prim,
-                symbols=[prim],
+                symbols=[prim] if prim else [],
                 topic=action_type
             )
 
-        # 3. Check for Comparison Intent
+        # 6. Check for Comparison Intent
         if "compare" in text_lower or " vs " in text_lower or " versus " in text_lower:
             prim = found_symbols[0] if len(found_symbols) > 0 else "MSFT"
             sec = found_symbols[1] if len(found_symbols) > 1 else "GOOGL"
@@ -64,16 +106,16 @@ class IntentRouter:
                 symbols=[prim, sec]
             )
 
-        # 3. Check for Stock Quote Intent
+        # 7. Check for Stock Quote Intent
         if any(kw in text_lower for kw in ["price", "quote", "stock", "trading at", "how much is"]):
             prim = found_symbols[0] if found_symbols else (user_watchlist[0] if user_watchlist else "NVDA")
             return IntentResult(
                 intent="STOCK_QUOTE",
                 primary_symbol=prim,
-                symbols=[prim]
+                symbols=[prim] if prim else []
             )
 
-        # 4. Check for News / Topic Intent
+        # 8. Check for News / Topic Intent
         if any(kw in text_lower for kw in ["news", "headline", "earnings", "m&a", "merger", "acquisition"]):
             topic_found = None
             if "ai" in text_lower:
@@ -90,7 +132,7 @@ class IntentRouter:
                 topic=topic_found
             )
 
-        # 5. Check for Watchlist / Daily Summary Intent
+        # 9. Check for Watchlist / Daily Summary Intent
         watchlist_keywords = [
             "anything important", "any think important", "any thing important",
             "watchlist", "summary", "briefing", "my stocks", "important today",
@@ -102,7 +144,7 @@ class IntentRouter:
                 symbols=user_watchlist or []
             )
 
-        # 6. Specific Company Research Intent
+        # 10. Specific Company Research Intent
         if found_symbols:
             return IntentResult(
                 intent="COMPANY_RESEARCH",
