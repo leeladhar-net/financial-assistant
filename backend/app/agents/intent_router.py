@@ -31,8 +31,11 @@ class IntentRouter:
         prompt = (
             f"Identify any company mentioned in this text: \"{text_clean}\" "
             f"and return only its standard ticker symbol. "
-            f"Important: For Indian companies, append '.NS' (e.g. 'Tata Steel' -> 'TATASTEEL.NS', 'Reliance' -> 'RELIANCE.NS', 'Wipro' -> 'WIPRO.NS', 'Infosys' -> 'INFY.NS'). "
-            f"For U.S. companies, return the ticker as is (e.g. 'Apple' -> 'AAPL', 'Netflix' -> 'NFLX'). "
+            f"Important Notes for Specific Corporate Renames:\n"
+            f"- Zomato -> ETERNAL.NS (Zomato was renamed to Eternal Ltd in March 2025)\n"
+            f"- Tata Motors -> TMCV.NS (Tata Motors was split and commercial ticker is TMCV)\n"
+            f"- For other Indian companies, append '.NS' (e.g. 'Tata Steel' -> 'TATASTEEL.NS', 'Reliance' -> 'RELIANCE.NS', 'Wipro' -> 'WIPRO.NS').\n"
+            f"- For U.S. companies, return the ticker as is (e.g. 'Apple' -> 'AAPL', 'Netflix' -> 'NFLX').\n"
             f"If no company is mentioned, reply with 'None'. Do not write any other text."
         )
 
@@ -82,17 +85,18 @@ class IntentRouter:
             "apple": "AAPL",
             "amazon": "AMZN",
             "tesla": "TSLA",
-            "reliance": "RELIANCE",
-            "tcs": "TCS",
-            "hdfc": "HDFC",
-            "tata steel": "TATASTEEL",
-            "tata motors": "TATAMOTORS",
-            "infosys": "INFY",
-            "wipro": "WIPRO",
-            "sbi": "SBIN",
-            "state bank": "SBIN",
-            "icici": "ICICIBANK",
-            "adani": "ADANIENT",
+            "reliance": "RELIANCE.NS",
+            "tcs": "TCS.NS",
+            "hdfc": "HDFCBANK.NS",
+            "tata steel": "TATASTEEL.NS",
+            "tata motors": "TMCV.NS",
+            "zomato": "ETERNAL.NS",
+            "infosys": "INFY.NS",
+            "wipro": "WIPRO.NS",
+            "sbi": "SBIN.NS",
+            "state bank": "SBIN.NS",
+            "icici": "ICICIBANK.NS",
+            "adani": "ADANIENT.NS",
             "meta": "META",
             "netflix": "NFLX",
             "intel": "INTC",

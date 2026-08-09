@@ -28,7 +28,13 @@ async def test_context_memory_intent_resolution():
     assert "GOOGL" in r4.symbols
 
     # Scenario 5: User asks about another company name explicitly (e.g. "Tata Steel") with context "NVDA"
-    # Should resolve to TATASTEEL and not get hijacked by NVDA context
+    # Should resolve to TATASTEEL.NS and not get hijacked by NVDA context
     r5 = await IntentRouter.classify_intent("what is price of tata steel", last_symbol="NVDA")
-    assert r5.primary_symbol == "TATASTEEL"
-    assert r5.symbols == ["TATASTEEL"]
+    assert r5.primary_symbol == "TATASTEEL.NS"
+    assert r5.symbols == ["TATASTEEL.NS"]
+
+    # Scenario 6: User asks about Zomato (which recently renamed to Eternal Ltd)
+    # Should resolve to ETERNAL.NS
+    r6 = await IntentRouter.classify_intent("cost of zomato", last_symbol="NVDA")
+    assert r6.primary_symbol == "ETERNAL.NS"
+    assert r6.symbols == ["ETERNAL.NS"]
