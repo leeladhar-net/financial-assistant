@@ -53,6 +53,7 @@ class UserPreference(Base):
     markets: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=list)
     briefing_time: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     response_style: Mapped[Optional[str]] = mapped_column(String(50), default=None, nullable=True)
+    preferred_language: Mapped[str] = mapped_column(String(50), default="English", nullable=False)
     
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=datetime.datetime.utcnow, nullable=False

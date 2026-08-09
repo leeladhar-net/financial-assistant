@@ -96,24 +96,32 @@ class FinancialResearchAgent:
 
         # 2. Use LLM to format the retrieved raw data into a warm conversational advisor response
         llm = LLMProvider()
+        lang = pref.preferred_language if pref and pref.preferred_language else "English"
         
         prompt = (
             f"User Profile Role: {role_title}\n"
             f"User Message: \"{user_message}\"\n"
             f"Intent: {intent}\n"
+            f"Target Output Language: {lang}\n"
             f"Raw Financial Data Context:\n{json.dumps(raw_data_summary, indent=2)}\n\n"
-            f"Generate the conversational, personal assistant response now."
+            f"Generate the conversational, personal assistant response now. You MUST write the response ENTIRELY in {lang}."
         )
 
         try:
-            ai_response = await llm.generate_response(prompt, system_prompt=ADVISOR_SYSTEM_PROMPT, fast=False)
+            ai_response = await llm.generate_response(
+                prompt, 
+                system_prompt=ADVISOR_SYSTEM_PROMPT + f"\n\n7. You MUST write the response ENTIRELY in {lang}. Do not mix languages.", 
+                fast=False
+            )
             if ai_response:
                 return ai_response
         except Exception as e:
             logger.error(f"Failed to generate conversational response via LLM: {e}")
 
         # Static fallback if LLM fails
-        return FinancialResearchAgent._fallback_response(intent, raw_data_summary, role_title)
+        fallback_msg = FinancialResearchAgent._fallback_response(intent, raw_data_summary, role_title)
+        from app.services.onboarding_service import OnboardingService
+        return await OnboardingService.translate_text(fallback_msg, lang)
 
     @staticmethod
     def _fallback_response(intent: str, data: dict, role_title: str) -> str:

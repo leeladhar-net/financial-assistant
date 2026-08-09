@@ -27,6 +27,13 @@ Onboarding Steps & Validation Rules:
    - Valid: A time or time range (e.g. "8 AM").
 6. ASK_RESPONSE_STYLE: User specifies response style (quick, standard, detailed).
    - Valid: Expresses preference for detail level.
+7. ASK_LANGUAGE: User confirms or changes preferred language (e.g. "Hindi", "English", "yes use Hindi").
+   - Valid: A language preference or confirmation.
+
+CRITICAL LANGUAGE AUTO-DETECTION:
+- In addition to standard parsing, ALWAYS analyze the user's response and detect the language they are writing in (e.g. English, Hindi/Hinglish, Telugu, Spanish, French).
+- Standardize this language to its English name (e.g., "Hindi", "Spanish", "Telugu", "French", "English") and set the "preferred_language" field in your JSON output.
+- Default to "English" if the language is not clear or if it is English.
 
 CRITICAL TYPO & SPELLING INSTRUCTIONS:
 - Users will make spelling mistakes or typos (e.g., "indai" for "India", "aplle" for "Apple", "stoock" for "stock", "infaltions" for "Inflation", "carsk" for "crash", "dorp" for "drop").
@@ -43,6 +50,7 @@ CRITICAL INSTRUCTIONS FOR USER ANSWERS LIKE 'yes', 'no', 'sure', 'yes like that'
   - Default Interests: ["General Market News", "Technology Trends"]
   - Default Briefing Time: "8:00 AM"
   - Default Response Style: "standard"
+  - Default Preferred Language: "English"
 
 Your JSON output structure must be:
 {
@@ -53,7 +61,8 @@ Your JSON output structure must be:
   "watchlist": ["string"] or null,
   "interests": ["string"] or null,
   "briefing_time": "string or null",
-  "response_style": "string or null"
+  "response_style": "string or null",
+  "preferred_language": "string or null"
 }
 Return raw JSON only."""
 
@@ -202,6 +211,19 @@ class ProfileExtractorService:
         elif current_state == "ASK_RESPONSE_STYLE":
             extracted["response_style"] = "standard"
 
+        # 7. Extract Preferred Language (simple fallback parser)
+        extracted["preferred_language"] = "English"
+        if "hindi" in text_lower or "नमस्ते" in text_lower:
+            extracted["preferred_language"] = "Hindi"
+        elif "telugu" in text_lower or "హలో" in text_lower:
+            extracted["preferred_language"] = "Telugu"
+        elif "spanish" in text_lower or "hola" in text_lower:
+            extracted["preferred_language"] = "Spanish"
+        elif "french" in text_lower or "bonjour" in text_lower:
+            extracted["preferred_language"] = "French"
+        elif current_state == "ASK_LANGUAGE":
+            extracted["preferred_language"] = text.strip().title()
+
         return extracted
 
     @staticmethod
@@ -213,5 +235,6 @@ class ProfileExtractorService:
             watchlist=parsed.get("watchlist"),
             interests=parsed.get("interests"),
             briefing_time=parsed.get("briefing_time"),
-            response_style=parsed.get("response_style")
+            response_style=parsed.get("response_style"),
+            preferred_language=parsed.get("preferred_language")
         )

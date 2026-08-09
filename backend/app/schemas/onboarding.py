@@ -8,6 +8,7 @@ class ExtractedProfileData(BaseModel):
     interests: Optional[List[str]] = None
     briefing_time: Optional[str] = None
     response_style: Optional[str] = None
+    preferred_language: Optional[str] = None
 
 class OnboardingStepResult(BaseModel):
     onboarding_completed: bool

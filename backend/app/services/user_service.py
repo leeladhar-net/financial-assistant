@@ -90,6 +90,7 @@ class UserService:
         markets: Optional[List[str]] = None,
         briefing_time: Optional[str] = None,
         response_style: Optional[str] = None,
+        preferred_language: Optional[str] = None,
     ) -> UserPreference:
         pref = UserService.get_user_preferences(db, user_id)
         if role is not None:
@@ -106,6 +107,8 @@ class UserService:
             pref.briefing_time = briefing_time
         if response_style is not None:
             pref.response_style = response_style
+        if preferred_language is not None:
+            pref.preferred_language = preferred_language
         db.commit()
         db.refresh(pref)
         return pref

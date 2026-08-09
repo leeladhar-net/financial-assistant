@@ -48,6 +48,10 @@ class OnboardingService:
             )
 
         # 3. Update DB records with extracted attributes
+        if parsed.get("preferred_language"):
+            UserService.update_user_preferences(db, user.id, preferred_language=parsed["preferred_language"])
+            MemoryService.save_memory(db, user.id, "preferred_language", parsed["preferred_language"], memory_type="profile")
+
         if parsed.get("role"):
             UserService.update_user_preferences(db, user.id, role=parsed["role"])
             MemoryService.save_memory(db, user.id, "role", parsed["role"], memory_type="profile")
@@ -76,40 +80,55 @@ class OnboardingService:
         pref = UserService.get_user_preferences(db, user.id)
         watchlists = user.watchlists
         interests = user.interests
+        target_lang = pref.preferred_language or "English"
+
+        # If brand new user and no info was parsed from the first message, ask the first question
+        if current_state == "NEW" and not parsed.get("role"):
+            UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_ROLE")
+            welcome_msg = (
+                "Hi! I'm your personal financial advisor. 💼\n\n"
+                "I'll help you track companies, global markets, and financial trends that align with your goals.\n\n"
+                "To get started, what best describes your current investment role or background? (e.g. retail investor, student, day trader, analyst)"
+            )
+            return await OnboardingService.translate_text(welcome_msg, target_lang)
 
         # Determine next question dynamically in a human-like, conversational tone
+        next_question = ""
         
         # Check: Professional Role
         if not pref.role:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_ROLE")
-            return "To help me tailor my research, what best describes your current investment role or background?"
+            next_question = "To help me tailor my research, what best describes your current investment role or background?"
 
         # Check: Markets
-        if not pref.markets or len(pref.markets) == 0:
+        elif not pref.markets or len(pref.markets) == 0:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_MARKETS")
             role_title = pref.role.replace("_", " ").title()
-            return f"Great, a {role_title}! What markets or regions do you follow most closely? (e.g. US, India, Global Tech)"
+            next_question = f"Great, a {role_title}! What markets or regions do you follow most closely? (e.g. US, India, Global Tech)"
 
         # Check: Watchlist Tickers
-        if not watchlists or len(watchlists) == 0:
+        elif not watchlists or len(watchlists) == 0:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_WATCHLIST")
             markets_str = " and ".join(pref.markets) if isinstance(pref.markets, list) else str(pref.markets)
-            return f"Understood, focusing on {markets_str} markets. Which specific companies or stock tickers should I keep an eye on for you?"
+            next_question = f"Understood, focusing on {markets_str} markets. Which specific companies or stock tickers should I keep an eye on for you?"
 
         # Check: Interests / Topics
-        if not interests or len(interests) == 0:
+        elif not interests or len(interests) == 0:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_INTERESTS")
-            return "Got it. When analyzing these stocks, what financial topics or events matter most to you? (e.g. AI, interest rates, earnings, inflation)"
+            next_question = "Got it. When analyzing these stocks, what financial topics or events matter most to you? (e.g. AI, interest rates, earnings, inflation)"
 
         # Check: Daily Briefing Time
-        if not pref.briefing_time:
+        elif not pref.briefing_time:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_BRIEFING_TIME")
-            return "Perfect. What time of day would you like to receive your personalized daily market briefing? (e.g. 8:00 AM, 9:00 AM)"
+            next_question = "Perfect. What time of day would you like to receive your personalized daily market briefing? (e.g. 8:00 AM, 9:00 AM)"
 
         # Check: Response Style
-        if not pref.response_style:
+        elif not pref.response_style:
             UserService.update_user_onboarding_status(db, user.id, completed=False, state="ASK_RESPONSE_STYLE")
-            return "Almost done! Do you prefer quick summaries, standard updates, or highly detailed financial deep-dives?"
+            next_question = "Almost done! Do you prefer quick summaries, standard updates, or highly detailed financial deep-dives?"
+
+        if next_question:
+            return await OnboardingService.translate_text(next_question, target_lang)
 
         # 5. Onboarding is fully complete!
         UserService.update_user_onboarding_status(db, user.id, completed=True, state="COMPLETED")
@@ -127,24 +146,50 @@ class OnboardingService:
             f"- Interests: {topics_str}\n"
             f"- Briefing: {pref.briefing_time}\n"
             f"- Response Style: {pref.response_style}\n"
+            f"Generate the recap in {target_lang}."
         )
         
+        recap_content = ""
         try:
             llm = LLMProvider()
             recap = await llm.generate_response(prompt, system_prompt=RECAP_SYSTEM_PROMPT, fast=False)
             if recap:
-                return (
-                    f"🎉 **Your assistant profile is set up!**\n\n"
-                    f"{recap}\n\n"
-                    f"Ask me about any company, market update, or financial topic to begin!"
-                )
+                recap_content = recap
         except Exception as e:
             logger.error(f"Failed to generate custom onboarding recap: {e}")
 
-        # Fallback recap if LLM fails
-        return (
+        if not recap_content:
+            recap_content = (
+                f"As your personal assistant, I will track *{symbols_str}* and monitor *{topics_str}* "
+                f"across the *{markets_str}* markets for you. I've scheduled your daily briefings for *{pref.briefing_time}*."
+            )
+
+        final_msg = (
             f"🎉 **Your assistant profile is set up!**\n\n"
-            f"As your personal assistant, I will track *{symbols_str}* and monitor *{topics_str}* "
-            f"across the *{markets_str}* markets for you. I've scheduled your daily briefings for *{pref.briefing_time}*.\n\n"
+            f"{recap_content}\n\n"
             f"Ask me about any company, market update, or financial topic to begin!"
         )
+        return await OnboardingService.translate_text(final_msg, target_lang)
+
+    @staticmethod
+    async def translate_text(text: str, target_language: str) -> str:
+        """
+        Translates text into the target language using Groq LLM.
+        Keeps stock tickers and emojis intact.
+        """
+        if not target_language or target_language.lower() == "english":
+            return text
+        
+        prompt = (
+            f"Translate the following text into fluent, warm, natural {target_language}. "
+            f"Do NOT change stock tickers (e.g. AAPL, NVDA) or emojis. "
+            f"Return ONLY the translated text without any explanation or extra symbols:\n\n{text}"
+        )
+        try:
+            llm = LLMProvider()
+            translated = await llm.generate_response(prompt, system_prompt="You are a warm, helpful translator.", fast=True)
+            if translated:
+                return translated.strip()
+        except Exception as e:
+            logger.error(f"Failed translation to {target_language}: {e}")
+        return text
