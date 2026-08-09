@@ -21,6 +21,11 @@ class IntentRouter:
         text_upper = text.upper()
         text_lower = text.lower()
 
+        # Check for simple greetings or start command
+        greetings = {"hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening", "/start"}
+        if text_lower.strip().rstrip(".!?") in greetings:
+            return IntentResult(intent="GREETING")
+
         # 1. Extract stock symbols from text
         # Regex matching capitalized tickers or company names
         found_symbols = []

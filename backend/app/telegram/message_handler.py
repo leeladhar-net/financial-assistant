@@ -162,7 +162,22 @@ class TelegramMessageHandler:
                     user_watchlists = [w.symbol for w in user.watchlists] if user.watchlists else []
                     intent_res = IntentRouter.classify_intent(clean_text, user_watchlist=user_watchlists, last_symbol=last_symbol)
                     
-                    if intent_res.intent == "PORTFOLIO_ADD":
+                    if intent_res.intent == "GREETING":
+                        if clean_text.lower() == "/start":
+                            assistant_response = (
+                                "👋 *Welcome back to your Financial Assistant!*\n\n"
+                                "Your profile is already fully set up. You can:\n"
+                                "• Ask about any stock (e.g. *'NVDA price'*)\n"
+                                "• View your watchlist summary (e.g. *'watchlist'*)\n"
+                                "• Check your holdings (e.g. *'portfolio'*)\n"
+                                "• Upload a financial PDF report to analyze it."
+                            )
+                        else:
+                            assistant_response = (
+                                "Hello! How can I help you with your financial research today?\n\n"
+                                "You can ask about any stock ticker (e.g. *'NVDA price'*), view your *'watchlist'*, or check your *'portfolio'*."
+                            )
+                    elif intent_res.intent == "PORTFOLIO_ADD":
                         from app.services.portfolio_service import PortfolioService
                         txn = await PortfolioService.parse_and_log_transaction(db, user.id, clean_text)
                         if txn:
