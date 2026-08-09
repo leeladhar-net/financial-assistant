@@ -31,7 +31,8 @@ Onboarding Steps & Validation Rules:
    - Valid: A language preference or confirmation.
 
 CRITICAL LANGUAGE AUTO-DETECTION:
-- In addition to standard parsing, ALWAYS analyze the user's response and detect the language they are writing in (e.g. English, Hindi/Hinglish, Telugu, Spanish, French).
+- In addition to standard parsing, ALWAYS analyze the user's response and detect the language they are writing in (e.g. English, Hindi, Telugu, Spanish, French).
+- **Transliteration Support:** If the user is writing using English/Roman letters but the language is Hindi (Hinglish, e.g. using words like "ka", "kya", "hai", "aaj", "chal raha"), set the "preferred_language" field to "Hindi". If they write in transliterated Telugu (using words like "entha", "ela", "unnaru", "cheppu"), set the "preferred_language" field to "Telugu".
 - Standardize this language to its English name (e.g., "Hindi", "Spanish", "Telugu", "French", "English") and set the "preferred_language" field in your JSON output.
 - Default to "English" if the language is not clear or if it is English.
 

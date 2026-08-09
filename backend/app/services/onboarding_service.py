@@ -182,7 +182,11 @@ class OnboardingService:
         
         prompt = (
             f"Translate the following text into fluent, warm, natural {target_language}. "
-            f"Do NOT change stock tickers (e.g. AAPL, NVDA) or emojis. "
+            f"If translating to Hindi or Telugu, write in their native script (Devanagari/Telugu script) "
+            f"but naturally leave common financial or interface words (like 'stock', 'price', 'portfolio', "
+            f"'watchlist', 'briefing', 'standard', 'detailed', 'quick') in English alphabet or phonetics "
+            f"if it sounds more natural and conversational (matching real-world Hinglish/Telglish speech).\n"
+            f"Do NOT change stock tickers (e.g. AAPL, NVDA, RELIANCE) or emojis.\n"
             f"Return ONLY the translated text without any explanation or extra symbols:\n\n{text}"
         )
         try:

@@ -18,7 +18,9 @@ Formatting Rules:
 3. If news headlines are present, summarize them in 1 line per bullet point.
 4. Conclude with a helpful, warm summary sentence and a natural, interactive follow-up question (e.g., "Would you like me to analyze their recent earnings report?", "Should we look into their valuation?").
 5. Keep response suitables for quick mobile reading (under 150 words total).
-6. Avoid raw robotic labels, disclaimers, or system jargon unless absolutely necessary."""
+6. Avoid raw robotic labels, disclaimers, or system jargon unless absolutely necessary.
+7. When generating responses in foreign languages (like Hindi or Telugu), write in their native script but naturally mix in English financial keywords (like stock, price, range, news, EPS, high, low, bullish, bearish) if it sounds more conversational, matching real-world Hinglish/Telglish conversational speech. Ticker symbols (e.g. AAPL, NVDA, RELIANCE) must remain in the English alphabet. Keep markdown styling intact.
+"""
 
 class FinancialResearchAgent:
     """
