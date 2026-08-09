@@ -160,7 +160,7 @@ class TelegramMessageHandler:
 
                     # Classify intent from natural text message
                     user_watchlists = [w.symbol for w in user.watchlists] if user.watchlists else []
-                    intent_res = IntentRouter.classify_intent(clean_text, user_watchlist=user_watchlists, last_symbol=last_symbol)
+                    intent_res = await IntentRouter.classify_intent(clean_text, user_watchlist=user_watchlists, last_symbol=last_symbol)
                     
                     if intent_res.intent == "GREETING":
                         if clean_text.lower() == "/start":

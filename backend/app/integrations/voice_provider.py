@@ -16,7 +16,7 @@ class VoiceProvider:
         # Demo transcription fallback / Speech-to-Text engine output
         transcription = "What is happening with the semiconductor sector and Nvidia today?"
         
-        intent_res = IntentRouter.classify_intent(transcription)
+        intent_res = await IntentRouter.classify_intent(transcription)
 
         return VoiceTranscriptionResult(
             transcription_text=transcription,

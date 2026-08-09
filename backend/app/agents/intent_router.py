@@ -1,16 +1,54 @@
+import json
 import re
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from app.schemas.financial import IntentResult
+from app.integrations.llm_provider import LLMProvider
+from app.core.config import settings
 from app.core.logging import logger
 
 class IntentRouter:
     """
     Classifies natural language user messages into financial intents and extracts entities (symbols, topics).
-    Supports Smart Context Memory through injection of last_symbol.
+    Uses selective LLM resolution to map arbitrary company names to symbols.
     """
 
     @staticmethod
-    def classify_intent(
+    async def resolve_company_to_symbol_llm(text: str) -> Optional[str]:
+        """
+        Uses Groq LLM to extract a company name from text and resolve it to a standard ticker symbol.
+        """
+        if not settings.LLM_API_KEY:
+            return None
+
+        # Clean query
+        text_clean = text.strip()
+        
+        # Avoid calling LLM for simple greetings, commands, or watchlist lookups
+        greetings = {"hi", "hello", "hey", "hola", "greetings", "good morning", "good afternoon", "good evening", "/start"}
+        if text_clean.lower() in greetings or text_clean.startswith("/"):
+            return None
+
+        prompt = (
+            f"Identify any company mentioned in this text: \"{text_clean}\" "
+            f"and return only its standard ticker symbol (e.g. AAPL, TSLA, NFLX, TATASTEEL, INFY). "
+            f"If no company is mentioned, reply with 'None'. Do not write any other text."
+        )
+
+        try:
+            llm = LLMProvider()
+            response_text = await llm.generate_response(prompt, system_prompt="You are a stock symbol resolver. Reply with the symbol only or 'None'.", fast=True)
+            if response_text:
+                symbol = response_text.strip().upper().replace(" ", "")
+                # Clean punctuation
+                symbol = re.sub(r'[^\w\.\:]', '', symbol)
+                if symbol and symbol != "NONE" and len(symbol) <= 12:
+                    return symbol
+        except Exception as e:
+            logger.warning(f"Selective LLM symbol resolution failed: {e}")
+        return None
+
+    @staticmethod
+    async def classify_intent(
         text: str,
         user_watchlist: Optional[List[str]] = None,
         last_symbol: Optional[str] = None
@@ -27,7 +65,6 @@ class IntentRouter:
             return IntentResult(intent="GREETING")
 
         # 1. Extract stock symbols from text
-        # Regex matching capitalized tickers or company names
         found_symbols = []
         potential_tickers = re.findall(r'\b[A-Z]{2,6}\b', text)
         stop_words = {"AND", "THE", "FOR", "INC", "CORP", "LTD", "PLC", "USA", "PM", "AM", "AI", "MA", "VS", "COMPARE", "PRICE", "NEWS"}
@@ -62,13 +99,19 @@ class IntentRouter:
             if comp in text_lower and sym not in found_symbols:
                 found_symbols.append(sym)
 
+        # Selective LLM Symbol Resolution: If no symbols found, run LLM resolution
+        if not found_symbols:
+            llm_symbol = await IntentRouter.resolve_company_to_symbol_llm(text)
+            if llm_symbol:
+                found_symbols = [llm_symbol]
+                logger.info(f"Selective LLM Symbol Resolution resolved '{text}' to symbol '{llm_symbol}'")
+
         # 2. Check for Portfolio Logging Intent (PORTFOLIO_ADD)
         trade_keywords = ["bought", "sold", "purchased", "logged"]
         is_add_portfolio = False
         if any(w in text_lower for w in trade_keywords):
             is_add_portfolio = True
         elif ("buy" in text_lower or "sell" in text_lower or "add" in text_lower) and any(c.isdigit() for c in text):
-            # e.g. "buy 10 AAPL" or "add 5 shares"
             is_add_portfolio = True
 
         if is_add_portfolio:
